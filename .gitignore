@@ -424,3 +424,13 @@ __pycache__/
 data/raw/
 data/processed/
 >>>>>>> d86a744 ("initial structure")
+# Ignore the virtual environment
+venv/
+__pycache__/
+
+# Ignore the data (the cloud server will build its own fresh dataset)
+data/
+*.parquet
+
+# Ignore Mac system files
+.DS_Store
