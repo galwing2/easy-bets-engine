@@ -28,8 +28,7 @@ def fetch_and_store():
             
             # FIX: Switched to the /events endpoint which allows sorting by volume
             for offset in [0, 100, 200]:
-                url = f"https://gamma-api.polymarket.com/events?active=true&closed=false&limit=100&offset={offset}&order=volume_24hr&ascending=false"
-                
+                url = f"https://gamma-api.polymarket.com/events?active=true&closed=false&limit=100&offset={offset}&order=volume&ascending=false"                
                 response = requests.get(url)
                 response.raise_for_status()
                 
