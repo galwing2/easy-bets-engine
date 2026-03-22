@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
-# 1. Load the secret connection string from the .env file
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
 
@@ -13,44 +12,46 @@ if not MONGO_URI:
     print("ERROR: MONGO_URI not found. Please check your .env file.")
     exit(1)
 
-# 2. Connect to MongoDB Atlas
-print("Connecting to MongoDB Atlas...")
 client = MongoClient(MONGO_URI)
-db = client["easy_bets"]         # The Database
-collection = db["live_markets"]  # The Collection (Table)
-
-# Polymarket API Endpoint (Fetching 20 active markets)
-API_URL = "https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=20"
+db = client["easy_bets"]         
+collection = db["live_markets"]  
 
 def fetch_and_store():
-    print("Starting data ingestion loop. Press Ctrl+C to stop.")
+    print("Starting high-volume data ingestion. Press Ctrl+C to stop.")
     
     while True:
         try:
-            # Use timezone-aware UTC (Fixes the previous DeprecationWarning!)
             current_time = datetime.now(timezone.utc)
-            print(f"[{current_time.strftime('%Y-%m-%d %H:%M:%S')}] Fetching live market data...")
+            print(f"[{current_time.strftime('%Y-%m-%d %H:%M:%S')}] Paginating API for Top 300 markets...")
             
-            # Fetch data from Polymarket
-            response = requests.get(API_URL)
-            response.raise_for_status() # Check for HTTP errors
+            all_market_data = []
             
-            market_data = response.json()
-            
-            # Ensure we received a valid list of markets
-            if isinstance(market_data, list) and len(market_data) > 0:
+            # The Pagination Loop: Page 1 (offset 0), Page 2 (offset 100), Page 3 (offset 200)
+            for offset in [0, 100, 200]:
+                # Notice we added limit=100, offset, and order=volume_24hr
+                url = f"https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=100&offset={offset}&order=volume_24hr&ascending=false"
                 
-                # Add our exact timestamp to every row before saving
-                for market in market_data:
+                response = requests.get(url)
+                response.raise_for_status()
+                
+                batch = response.json()
+                
+                if isinstance(batch, list) and len(batch) > 0:
+                    all_market_data.extend(batch)
+                else:
+                    break # Stop if we run out of markets
+                    
+            if len(all_market_data) > 0:
+                # Stamp the whole batch with the exact same timestamp
+                for market in all_market_data:
                     market["ingestion_timestamp"] = current_time
                     
-                # Insert the massive batch into MongoDB instantly
-                collection.insert_many(market_data)
-                print(f"Successfully saved {len(market_data)} live markets to MongoDB.")
+                collection.insert_many(all_market_data)
+                print(f"Success! Saved {len(all_market_data)} high-volume markets to MongoDB.")
             else:
-                print("Warning: Received empty or unexpected data format from Polymarket.")
+                print("Warning: Received no data from Polymarket.")
 
-            # Wait 5 minutes (300 seconds) before the next pull
+            # Wait 5 minutes before the next sweep
             time.sleep(300)
 
         except Exception as e:
@@ -59,11 +60,8 @@ def fetch_and_store():
             time.sleep(60)
 
 if __name__ == "__main__":
-    # Test the database connection before starting the engine
     try:
         client.admin.command('ping')
-        print("Success! You successfully connected to MongoDB Atlas.")
         fetch_and_store()
     except Exception as e:
         print(f"MongoDB Connection Failed: {e}")
-        print("Check your MONGO_URI string and ensure your IP address is whitelisted in Atlas (0.0.0.0/0).")
