@@ -435,3 +435,4 @@ data/
 # Ignore Mac system files
 .DS_Store
 *.pem
+.env
