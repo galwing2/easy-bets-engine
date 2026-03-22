@@ -9,7 +9,7 @@ load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
 
 if not MONGO_URI:
-    print("ERROR: MONGO_URI not found. Please check your .env file.")
+    print("ERROR: MONGO_URI not found.")
     exit(1)
 
 client = MongoClient(MONGO_URI)
@@ -22,14 +22,13 @@ def fetch_and_store():
     while True:
         try:
             current_time = datetime.now(timezone.utc)
-            print(f"[{current_time.strftime('%Y-%m-%d %H:%M:%S')}] Paginating API for Top 300 markets...")
+            print(f"[{current_time.strftime('%Y-%m-%d %H:%M:%S')}] Paginating API for Top 300 Events...")
             
             all_market_data = []
             
-            # The Pagination Loop: Page 1 (offset 0), Page 2 (offset 100), Page 3 (offset 200)
+            # FIX: Switched to the /events endpoint which allows sorting by volume
             for offset in [0, 100, 200]:
-                # Notice we added limit=100, offset, and order=volume_24hr
-                url = f"https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=100&offset={offset}&order=volume_24hr&ascending=false"
+                url = f"https://gamma-api.polymarket.com/events?active=true&closed=false&limit=100&offset={offset}&order=volume_24hr&ascending=false"
                 
                 response = requests.get(url)
                 response.raise_for_status()
@@ -37,12 +36,14 @@ def fetch_and_store():
                 batch = response.json()
                 
                 if isinstance(batch, list) and len(batch) > 0:
-                    all_market_data.extend(batch)
+                    # FIX: Events contain multiple markets. We loop through and extract them all.
+                    for event in batch:
+                        if "markets" in event:
+                            all_market_data.extend(event["markets"])
                 else:
-                    break # Stop if we run out of markets
+                    break
                     
             if len(all_market_data) > 0:
-                # Stamp the whole batch with the exact same timestamp
                 for market in all_market_data:
                     market["ingestion_timestamp"] = current_time
                     
@@ -51,7 +52,6 @@ def fetch_and_store():
             else:
                 print("Warning: Received no data from Polymarket.")
 
-            # Wait 5 minutes before the next sweep
             time.sleep(300)
 
         except Exception as e:

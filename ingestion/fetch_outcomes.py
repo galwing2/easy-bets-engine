@@ -3,58 +3,54 @@ import requests
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
-# 1. Load the secure connection
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
 
 if not MONGO_URI:
-    print("ERROR: MONGO_URI not found.")
+    print("ERROR: MONGO_URI not found. Please check your .env file.")
     exit(1)
 
-# Connect to MongoDB
 client = MongoClient(MONGO_URI)
 db = client["easy_bets"]
 outcomes_collection = db["resolved_outcomes"] 
 
-# Polymarket API Endpoint (Fetching CLOSED markets)
-# We look for closed=true to get the historical/finished data
-API_URL = "https://gamma-api.polymarket.com/markets?closed=true&limit=100"
-
 def fetch_resolved_outcomes():
-    print("Fetching closed markets to build the truth dataset...")
+    print("Paginating API to fetch a massive batch of resolved outcomes...")
     
-    try:
-        response = requests.get(API_URL)
-        response.raise_for_status()
-        closed_markets = response.json()
+    total_inserted = 0
+    
+    # The Pagination Loop: Grabbing 5 pages of 100 markets each
+    for offset in [0, 100, 200, 300, 400]:
+        print(f"Fetching closed markets (offset {offset})...")
+        url = f"https://gamma-api.polymarket.com/markets?closed=true&limit=100&offset={offset}"
         
-        if isinstance(closed_markets, list) and len(closed_markets) > 0:
-            new_inserts = 0
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            closed_markets = response.json()
             
-            for market in closed_markets:
-                # Use the market's unique ID as our database _id to prevent duplicates
-                market_id = market.get("conditionId") or market.get("id")
-                
-                if market_id:
-                    # Upsert: Update if it exists, insert if it doesn't
-                    # This ensures we don't save the same closed market twice
-                    result = outcomes_collection.update_one(
-                        {"_id": market_id},
-                        {"$set": market},
-                        upsert=True
-                    )
+            if isinstance(closed_markets, list) and len(closed_markets) > 0:
+                for market in closed_markets:
+                    # Use the market's unique ID as our database _id to prevent duplicates
+                    market_id = market.get("conditionId") or market.get("id")
                     
-                    if result.upserted_id:
-                        new_inserts += 1
+                    if market_id:
+                        # Upsert: Update if it exists, insert if it doesn't
+                        result = outcomes_collection.update_one(
+                            {"_id": market_id},
+                            {"$set": market},
+                            upsert=True
+                        )
+                        
+                        if result.upserted_id:
+                            total_inserted += 1
+            else:
+                break # Stop if we run out of historical data
+                
+        except Exception as e:
+            print(f"Error on offset {offset}: {e}")
 
-            print(f"Successfully added {new_inserts} new resolved outcomes to the database.")
-            print(f"Total closed markets processed: {len(closed_markets)}")
-            
-        else:
-            print("No closed markets found or unexpected data format.")
-
-    except Exception as e:
-        print(f"Error fetching outcomes: {e}")
+    print(f"Success! Added {total_inserted} brand new resolved outcomes to the database.")
 
 if __name__ == "__main__":
     fetch_resolved_outcomes()
