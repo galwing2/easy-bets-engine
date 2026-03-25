@@ -42,12 +42,10 @@ def fetch_and_store():
                 else:
                     break
                     
-            if len(all_market_data) > 0:
-                for market in all_market_data:
-                    market["ingestion_timestamp"] = current_time
-                    
-                collection.insert_many(all_market_data)
-                print(f"Success! Saved {len(all_market_data)} high-volume markets to MongoDB.")
+            if all_markets:
+                db.live_markets.drop() # LINE 1: Vaporize the old 5-minute snapshot
+                db.live_markets.insert_many(all_markets) # LINE 2: Insert the fresh one
+                print(f"Success! Live Cache updated with {len(all_markets)} markets.") # LINE 3
             else:
                 print("Warning: Received no data from Polymarket.")
 
