@@ -5,10 +5,21 @@ import time
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
-# 1. Connect to your Cloud Vault
+# Connect to your Cloud Vault
 load_dotenv()
 client = MongoClient(os.getenv("MONGO_URI"))
 db = client["easy_bets"]
+
+def safe_parse(val):
+    """The Bulletproof Parser: Handles both stringified JSON and native Python lists."""
+    if isinstance(val, str):
+        try:
+            return json.loads(val)
+        except:
+            return []
+    elif isinstance(val, list):
+        return val
+    return []
 
 def build_modern_dataset():
     print("Phase 1: Fetching the highest-volume modern markets...")
@@ -22,39 +33,46 @@ def build_modern_dataset():
     for i, event in enumerate(events):
         markets = event.get("markets", [])
         for market in markets:
-            outcomes = market.get("outcomes", [])
+            # THE FIX: Safely parse the arrays regardless of how the API formats them
+            outcomes = safe_parse(market.get("outcomes", []))
+            prices = safe_parse(market.get("outcomePrices", []))
+            clob_ids = safe_parse(market.get("clobTokenIds", []))
             
             # We only want clean, binary Yes/No markets
             if "Yes" not in outcomes or "No" not in outcomes:
                 continue
                 
-            prices = market.get("outcomePrices", [])
             try:
                 prices_float = [float(p) for p in prices]
             except:
                 continue
             
             # Identify if it clearly resolved to 1 (Yes) or 0 (No)
-            if prices_float == [1.0, 0.0] or prices_float == [0.0, 1.0]:
-                yes_index = outcomes.index("Yes")
-                target = 1 if prices_float[yes_index] == 1.0 else 0
+            if not prices_float or len(prices_float) != 2:
+                continue
+                
+            yes_index = outcomes.index("Yes")
+            no_index = outcomes.index("No")
+            
+            if prices_float[yes_index] >= 0.99 and prices_float[no_index] <= 0.01:
+                target = 1
+            elif prices_float[yes_index] <= 0.01 and prices_float[no_index] >= 0.99:
+                target = 0
             else:
                 continue
                 
             try:
-                clob_ids = json.loads(market.get("clobTokenIds", "[]"))
                 yes_token_id = clob_ids[yes_index]
             except:
                 continue
                 
-            # Fetch price history from the CLOB API
+            # Fetch the historical price chart
             history_url = f"https://clob.polymarket.com/prices-history?market={yes_token_id}&interval=max"
             
             try:
                 h_resp = requests.get(history_url, timeout=5)
                 history = h_resp.json().get('history', [])
                 
-                # Fallback if 'max' interval is rejected
                 if not history:
                     history_url = f"https://clob.polymarket.com/prices-history?market={yes_token_id}&fidelity=1440"
                     h_resp = requests.get(history_url, timeout=5)
@@ -75,18 +93,17 @@ def build_modern_dataset():
         if (i + 1) % 10 == 0:
             print(f"Processed {i + 1} events... (Generated {len(matrix_rows)} training rows so far)")
 
-    # 2. Save directly to MongoDB
+    # Save directly to MongoDB
     if matrix_rows:
         print(f"\n--- MATRIX COMPLETE: {len(matrix_rows)} rows ---")
         print("Clearing out any old training data...")
-        db["training_matrix"].drop() # Wipe the old slate clean
+        db["training_matrix"].drop() 
         
         print("Uploading fresh Matrix to MongoDB Atlas...")
-        # Insert the massive list of dictionaries directly into the cloud
         db["training_matrix"].insert_many(matrix_rows)
         print("Success! Your AI training data is securely locked in the vault.")
     else:
-        print("Error: No rows generated.")
+        print("Error: Still no rows generated.")
 
 if __name__ == "__main__":
     build_modern_dataset()
