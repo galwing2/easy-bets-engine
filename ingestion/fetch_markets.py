@@ -26,7 +26,6 @@ def fetch_and_store():
             
             all_market_data = []
             
-            # FIX: Switched to the /events endpoint which allows sorting by volume
             for offset in [0, 100, 200]:
                 url = f"https://gamma-api.polymarket.com/events?active=true&closed=false&limit=100&offset={offset}&order=volume&ascending=false"                
                 response = requests.get(url)
@@ -35,17 +34,17 @@ def fetch_and_store():
                 batch = response.json()
                 
                 if isinstance(batch, list) and len(batch) > 0:
-                    # FIX: Events contain multiple markets. We loop through and extract them all.
                     for event in batch:
                         if "markets" in event:
                             all_market_data.extend(event["markets"])
                 else:
                     break
                     
-            if all_markets:
-                db.live_markets.drop() # LINE 1: Vaporize the old 5-minute snapshot
-                db.live_markets.insert_many(all_markets) # LINE 2: Insert the fresh one
-                print(f"Success! Live Cache updated with {len(all_markets)} markets.") # LINE 3
+            # THE FIX: using all_market_data instead of all_markets
+            if all_market_data:
+                db.live_markets.drop() 
+                db.live_markets.insert_many(all_market_data) 
+                print(f"Success! Live Cache updated with {len(all_market_data)} markets.") 
             else:
                 print("Warning: Received no data from Polymarket.")
 
