@@ -41,111 +41,120 @@ def load_matrix() -> pd.DataFrame:
 
 
 # ── 2. Feature Engineering ─────────────────────────────────────────────────────
+# What % of a market's lifetime to use as the observation window.
+# 0.5 = we only look at the first 50% of the market's life and predict the end.
+# This simulates what you'd actually know about a live open market.
+SNAPSHOT_PCT = 0.50
+
 def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Collapses each market's time-series into one feature row.
 
-    Features engineered:
-      Trajectory  – price at 10/25/50/75/90% of market lifetime
-      Momentum    – slope (linear regression) of price over full lifetime
-      Volatility  – rolling std, max drawdown, number of direction flips
-      Conviction  – how long the market spent above 0.7 or below 0.3
-      Liquidity   – number of observed data points (proxy for volume)
-      Extremes    – max price, min price, final price before resolution
+    IMPORTANT — leakage prevention:
+      We only use the first SNAPSHOT_PCT of each market's lifetime.
+      This simulates what we'd know about a live market mid-way through,
+      and is what the live scanner will feed in for open markets.
+
+    Features engineered (all from the early window only):
+      Trajectory  – price at 10/25/50% of the observation window
+      Momentum    – linear slope of price across the observation window
+      Volatility  – std, max drawdown, direction flip count
+      Conviction  – time spent above 0.7 / below 0.3 / near 0.5
+      Liquidity   – number of observed data points (proxy for activity)
     """
-    print("⚙️  Engineering features...")
+    print(f"⚙️  Engineering features (observation window: first {int(SNAPSHOT_PCT*100)}% of lifetime)...")
     records = []
 
     for market_id, group in df.groupby("market_id"):
         g = group.sort_values("timestamp").reset_index(drop=True)
-        prices = g["yes_price"].astype(float).values
+        all_prices = g["yes_price"].astype(float).values
         target = int(g["target"].iloc[0])
-        n = len(prices)
+        n_total = len(all_prices)
 
-        if n < 5:          # not enough data points to be meaningful
+        if n_total < 10:   # need enough points to have a meaningful window
             continue
 
-        # ── Trajectory: price at lifecycle quantiles ──────────────────────────
+        # ── Slice to observation window only ──────────────────────────────────
+        cutoff = max(5, int(n_total * SNAPSHOT_PCT))
+        prices = all_prices[:cutoff]
+        n = len(prices)
+
+        # ── Trajectory: price at quantiles of the observation window ──────────
         def price_at_pct(pct):
             idx = int(np.clip(pct * n, 0, n - 1))
             return float(prices[idx])
 
-        p10  = price_at_pct(0.10)
-        p25  = price_at_pct(0.25)
-        p50  = price_at_pct(0.50)
-        p75  = price_at_pct(0.75)
-        p90  = price_at_pct(0.90)
-        p_final = float(prices[-1])
-        p_open  = float(prices[0])
+        p_open = price_at_pct(0.0)
+        p25    = price_at_pct(0.25)
+        p50    = price_at_pct(0.50)   # midpoint of our window (= 25% of full life)
+        p75    = price_at_pct(0.75)
+        p_now  = float(prices[-1])    # most recent price in the window
 
-        # ── Momentum: linear slope across whole lifetime ──────────────────────
+        # ── Momentum ──────────────────────────────────────────────────────────
         x = np.arange(n)
-        slope = float(np.polyfit(x, prices, 1)[0])          # per-tick price change
-        slope_late = float(                                  # slope of last 25%
-            np.polyfit(x[int(0.75*n):], prices[int(0.75*n):], 1)[0]
-            if n > 4 else slope
+        slope = float(np.polyfit(x, prices, 1)[0])
+
+        # slope of the last quarter of our window (recent acceleration)
+        late_start = int(0.75 * n)
+        slope_recent = float(
+            np.polyfit(x[late_start:], prices[late_start:], 1)[0]
+            if n - late_start > 2 else slope
         )
 
         # ── Volatility ────────────────────────────────────────────────────────
         diffs = np.diff(prices)
-        volatility    = float(np.std(diffs))
-        max_price     = float(np.max(prices))
-        min_price     = float(np.min(prices))
-        price_range   = max_price - min_price
+        volatility   = float(np.std(diffs))
+        max_price    = float(np.max(prices))
+        min_price    = float(np.min(prices))
+        price_range  = max_price - min_price
 
-        # max drawdown: biggest single drop from a running peak
-        running_max   = np.maximum.accumulate(prices)
-        drawdowns     = running_max - prices
-        max_drawdown  = float(np.max(drawdowns))
+        running_max  = np.maximum.accumulate(prices)
+        drawdowns    = running_max - prices
+        max_drawdown = float(np.max(drawdowns))
 
-        # direction flips (how "choppy" the market was)
-        signs         = np.sign(diffs)
-        flips         = int(np.sum(np.diff(signs) != 0))
+        signs  = np.sign(diffs)
+        flips  = int(np.sum(np.diff(signs) != 0))
 
-        # ── Conviction: time spent in strong-signal zones ─────────────────────
-        pct_above_70  = float(np.mean(prices > 0.70))
-        pct_below_30  = float(np.mean(prices < 0.30))
-        pct_near_50   = float(np.mean((prices > 0.45) & (prices < 0.55)))
+        # ── Conviction: time in strong-signal zones ───────────────────────────
+        pct_above_70 = float(np.mean(prices > 0.70))
+        pct_below_30 = float(np.mean(prices < 0.30))
+        pct_near_50  = float(np.mean((prices > 0.45) & (prices < 0.55)))
 
-        # ── Delta features: late vs early price ───────────────────────────────
-        delta_full    = p_final - p_open
-        delta_late    = p_final - p50
-        delta_mid     = p50 - p_open
+        # ── Delta: how much has price moved so far ────────────────────────────
+        delta_so_far  = p_now - p_open
+        delta_recent  = p_now - p50
 
         # ── Liquidity proxy ───────────────────────────────────────────────────
         n_points = n
 
         records.append({
-            # trajectory
-            "p_open":       p_open,
-            "p10":          p10,
-            "p25":          p25,
-            "p50":          p50,
-            "p75":          p75,
-            "p90":          p90,
-            "p_final":      p_final,
+            # trajectory (window only — no future data)
+            "p_open":        p_open,
+            "p25":           p25,
+            "p50":           p50,
+            "p75":           p75,
+            "p_now":         p_now,
             # momentum
-            "slope":        slope,
-            "slope_late":   slope_late,
+            "slope":         slope,
+            "slope_recent":  slope_recent,
             # volatility
-            "volatility":   volatility,
-            "max_price":    max_price,
-            "min_price":    min_price,
-            "price_range":  price_range,
-            "max_drawdown": max_drawdown,
-            "flips":        flips,
+            "volatility":    volatility,
+            "max_price":     max_price,
+            "min_price":     min_price,
+            "price_range":   price_range,
+            "max_drawdown":  max_drawdown,
+            "flips":         flips,
             # conviction
-            "pct_above_70": pct_above_70,
-            "pct_below_30": pct_below_30,
-            "pct_near_50":  pct_near_50,
+            "pct_above_70":  pct_above_70,
+            "pct_below_30":  pct_below_30,
+            "pct_near_50":   pct_near_50,
             # deltas
-            "delta_full":   delta_full,
-            "delta_late":   delta_late,
-            "delta_mid":    delta_mid,
+            "delta_so_far":  delta_so_far,
+            "delta_recent":  delta_recent,
             # liquidity
-            "n_points":     n_points,
+            "n_points":      n_points,
             # label
-            "target":       target,
+            "target":        target,
         })
 
     feat_df = pd.DataFrame(records)
@@ -156,12 +165,12 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
 
 # ── 3. Train XGBoost ───────────────────────────────────────────────────────────
 FEATURE_COLS = [
-    "p_open", "p10", "p25", "p50", "p75", "p90", "p_final",
-    "slope", "slope_late",
+    "p_open", "p25", "p50", "p75", "p_now",
+    "slope", "slope_recent",
     "volatility", "max_price", "min_price", "price_range",
     "max_drawdown", "flips",
     "pct_above_70", "pct_below_30", "pct_near_50",
-    "delta_full", "delta_late", "delta_mid",
+    "delta_so_far", "delta_recent",
     "n_points",
 ]
 

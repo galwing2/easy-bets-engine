@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EasyBets — Find Your Edge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* ── Reset & Variables ───────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0a0c10;
+    --surface:   #111318;
+    --surface2:  #181c24;
+    --border:    #1f2433;
+    --accent:    #00e676;
+    --accent2:   #00b0ff;
+    --danger:    #ff4444;
+    --warn:      #ffb300;
+    --text:      #e8ecf4;
+    --muted:     #5a6180;
+    --mono:      'DM Mono', monospace;
+    --sans:      'Syne', sans-serif;
+  }
+
+  html { font-size: 16px; scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Noise overlay ───────────────────────────────────────────────────────── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 999;
+    opacity: 0.4;
+  }
+
+  /* ── Screens ─────────────────────────────────────────────────────────────── */
+  .screen {
+    display: none;
+    min-height: 100vh;
+    animation: fadeIn 0.4s ease;
+  }
+  .screen.active { display: flex; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── SCREEN 1: Landing ───────────────────────────────────────────────────── */
+  #screen-landing {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    padding: 2rem;
+  }
+
+  .grid-bg {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 80% 70% at 50% 50%, black 20%, transparent 100%);
+    opacity: 0.4;
+  }
+
+  .glow-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(120px);
+    pointer-events: none;
+  }
+  .glow-orb.green {
+    width: 500px; height: 500px;
+    background: rgba(0, 230, 118, 0.08);
+    top: -100px; left: -100px;
+  }
+  .glow-orb.blue {
+    width: 400px; height: 400px;
+    background: rgba(0, 176, 255, 0.06);
+    bottom: -80px; right: -80px;
+  }
+
+  .landing-content {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    max-width: 640px;
+  }
+
+  .logo-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 99px;
+    padding: 0.35rem 1rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+    margin-bottom: 2rem;
+    animation: fadeIn 0.6s ease 0.1s both;
+  }
+  .logo-badge::before {
+    content: '';
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.4; transform: scale(0.8); }
+  }
+
+  .landing-title {
+    font-size: clamp(3rem, 8vw, 5.5rem);
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    margin-bottom: 1.5rem;
+    animation: fadeIn 0.6s ease 0.2s both;
+  }
+  .landing-title span {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .landing-sub {
+    font-size: 1.15rem;
+    color: var(--muted);
+    line-height: 1.6;
+    margin-bottom: 2.5rem;
+    font-weight: 400;
+    animation: fadeIn 0.6s ease 0.3s both;
+  }
+
+  .cta-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    background: var(--accent);
+    color: #000;
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: 1rem;
+    padding: 0.9rem 2.2rem;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+    animation: fadeIn 0.6s ease 0.4s both;
+    letter-spacing: 0.01em;
+  }
+  .cta-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(0, 230, 118, 0.3);
+  }
+  .cta-btn svg { width: 18px; height: 18px; }
+
+  .landing-stats {
+    display: flex;
+    gap: 2.5rem;
+    justify-content: center;
+    margin-top: 3.5rem;
+    animation: fadeIn 0.6s ease 0.5s both;
+  }
+  .stat {
+    text-align: center;
+  }
+  .stat-val {
+    font-family: var(--mono);
+    font-size: 1.6rem;
+    font-weight: 500;
+    color: var(--text);
+    display: block;
+  }
+  .stat-label {
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  /* ── SCREEN 2: Onboarding Chat ───────────────────────────────────────────── */
+  #screen-chat {
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 0;
+  }
+
+  .chat-header {
+    width: 100%;
+    padding: 1.2rem 2rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .chat-logo {
+    font-weight: 800;
+    font-size: 1.1rem;
+    letter-spacing: -0.02em;
+  }
+  .chat-logo span { color: var(--accent); }
+  .step-indicator {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+
+  .chat-body {
+    flex: 1;
+    width: 100%;
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+    min-height: calc(100vh - 140px);
+  }
+
+  .msg {
+    display: flex;
+    gap: 0.8rem;
+    align-items: flex-start;
+    animation: msgIn 0.3s ease;
+  }
+  @keyframes msgIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .msg.user { flex-direction: row-reverse; }
+
+  .avatar {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+  }
+  .avatar.ai {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #000;
+    font-weight: 700;
+  }
+  .avatar.user-av {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+
+  .bubble {
+    max-width: 75%;
+    padding: 0.85rem 1.1rem;
+    border-radius: 16px;
+    font-size: 0.95rem;
+    line-height: 1.55;
+  }
+  .msg.ai .bubble {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top-left-radius: 4px;
+    color: var(--text);
+  }
+  .msg.user .bubble {
+    background: var(--accent);
+    color: #000;
+    font-weight: 500;
+    border-top-right-radius: 4px;
+  }
+
+  /* Quick-reply chips */
+  .chips-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding-left: 42px;
+    animation: msgIn 0.3s ease 0.15s both;
+  }
+  .chip {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.45rem 0.9rem;
+    border-radius: 99px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    font-family: var(--sans);
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+  .chip:hover, .chip.selected {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(0, 230, 118, 0.06);
+  }
+
+  .chat-input-row {
+    width: 100%;
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 1rem 1.5rem 1.5rem;
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+  }
+  .chat-input {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.8rem 1.1rem;
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .chat-input:focus { border-color: var(--accent); }
+  .chat-input::placeholder { color: var(--muted); }
+
+  .send-btn {
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 10px;
+    width: 42px; height: 42px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.15s;
+    flex-shrink: 0;
+  }
+  .send-btn:hover { transform: scale(1.05); }
+  .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .typing-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    background: var(--muted);
+    border-radius: 50%;
+    animation: blink 1.2s infinite;
+  }
+  .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink {
+    0%, 80%, 100% { opacity: 0.2; }
+    40%           { opacity: 1; }
+  }
+
+  /* ── SCREEN 3: Markets Feed ──────────────────────────────────────────────── */
+  #screen-markets {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .markets-header {
+    padding: 1.2rem 2rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .markets-logo {
+    font-weight: 800;
+    font-size: 1.1rem;
+    letter-spacing: -0.02em;
+  }
+  .markets-logo span { color: var(--accent); }
+
+  .profile-pill {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 99px;
+    padding: 0.3rem 0.8rem 0.3rem 0.3rem;
+    font-size: 0.78rem;
+    color: var(--muted);
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .profile-pill:hover { border-color: var(--accent); color: var(--accent); }
+  .profile-dot {
+    width: 24px; height: 24px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 50%;
+  }
+
+  .markets-body {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+    width: 100%;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.8rem;
+    margin-bottom: 1.5rem;
+  }
+  .section-title {
+    font-size: 1.3rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .section-count {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+  }
+
+  .filters {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.5rem;
+  }
+  .filter-chip {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 0.35rem 0.8rem;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: var(--sans);
+  }
+  .filter-chip.active {
+    background: rgba(0, 230, 118, 0.1);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* Market cards */
+  .market-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem 1.4rem;
+    margin-bottom: 0.8rem;
+    transition: border-color 0.2s, transform 0.15s;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+  }
+  .market-card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    border-radius: 3px 0 0 3px;
+  }
+  .market-card.overpriced::before  { background: var(--danger); }
+  .market-card.underpriced::before { background: var(--accent); }
+  .market-card.value::before       { background: var(--warn); }
+
+  .market-card:hover {
+    border-color: var(--muted);
+    transform: translateY(-1px);
+  }
+
+  .card-top {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 0.8rem;
+  }
+
+  .card-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .card-tag.arb     { background: rgba(255,68,68,0.12); color: var(--danger); border: 1px solid rgba(255,68,68,0.2); }
+  .card-tag.edge    { background: rgba(0,230,118,0.1);  color: var(--accent); border: 1px solid rgba(0,230,118,0.2); }
+  .card-tag.value   { background: rgba(255,179,0,0.1);  color: var(--warn);   border: 1px solid rgba(255,179,0,0.2); }
+
+  .card-question {
+    font-size: 0.98rem;
+    font-weight: 600;
+    line-height: 1.45;
+    letter-spacing: -0.01em;
+    flex: 1;
+  }
+
+  .card-meta {
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
+    flex-wrap: wrap;
+  }
+
+  .price-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+  .price-label {
+    font-family: var(--mono);
+    font-size: 0.62rem;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .price-val {
+    font-family: var(--mono);
+    font-size: 1.05rem;
+    font-weight: 500;
+  }
+  .price-val.yes { color: var(--accent); }
+  .price-val.no  { color: var(--danger); }
+
+  .edge-badge {
+    margin-left: auto;
+    padding: 0.4rem 0.8rem;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+  .edge-badge.positive { background: rgba(0,230,118,0.12); color: var(--accent); }
+  .edge-badge.negative { background: rgba(255,68,68,0.12);  color: var(--danger); }
+
+  .card-explain {
+    margin-top: 0.8rem;
+    padding-top: 0.8rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.83rem;
+    color: var(--muted);
+    line-height: 1.5;
+    font-style: italic;
+    display: none;
+  }
+  .market-card.expanded .card-explain { display: block; }
+
+  .card-actions {
+    margin-top: 0.8rem;
+    display: flex;
+    gap: 0.5rem;
+    display: none;
+  }
+  .market-card.expanded .card-actions { display: flex; }
+
+  .action-btn {
+    padding: 0.45rem 1rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-family: var(--sans);
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: opacity 0.15s;
+  }
+  .action-btn:hover { opacity: 0.85; }
+  .action-btn.yes-btn { background: var(--accent); color: #000; }
+  .action-btn.no-btn  { background: var(--danger);  color: #fff; }
+  .action-btn.poly-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+
+  /* Empty / loading states */
+  .loading-state {
+    text-align: center;
+    padding: 4rem 2rem;
+  }
+  .spinner {
+    width: 36px; height: 36px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    margin: 0 auto 1rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+  }
+
+  /* Arb group card */
+  .arb-group {
+    background: var(--surface);
+    border: 1px solid rgba(255,68,68,0.25);
+    border-radius: 12px;
+    padding: 1.25rem 1.4rem;
+    margin-bottom: 0.8rem;
+  }
+  .arb-group-title {
+    font-size: 0.72rem;
+    font-family: var(--mono);
+    color: var(--danger);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 0.8rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .arb-sum {
+    margin-left: auto;
+    font-size: 0.9rem;
+    color: var(--text);
+  }
+  .arb-leg {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+  }
+  .arb-leg:last-child { border-bottom: none; }
+  .arb-price {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    color: var(--danger);
+    flex-shrink: 0;
+    width: 42px;
+    text-align: right;
+  }
+  .arb-question { flex: 1; color: var(--text); }
+  .arb-fade-tag {
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    padding: 0.1rem 0.4rem;
+    background: rgba(255,68,68,0.12);
+    color: var(--danger);
+    border-radius: 3px;
+    text-transform: uppercase;
+  }
+
+  /* Interest tag in header */
+  .interest-tag {
+    background: rgba(0,230,118,0.08);
+    border: 1px solid rgba(0,230,118,0.2);
+    color: var(--accent);
+    padding: 0.25rem 0.6rem;
+    border-radius: 99px;
+    font-size: 0.72rem;
+    font-family: var(--mono);
+  }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    .landing-stats { gap: 1.5rem; }
+    .card-meta { gap: 0.8rem; }
+    .chat-body { padding: 1.2rem 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ══ SCREEN 1: LANDING ════════════════════════════════════════════════════ -->
+<div id="screen-landing" class="screen active">
+  <div class="grid-bg"></div>
+  <div class="glow-orb green"></div>
+  <div class="glow-orb blue"></div>
+
+  <div class="landing-content">
+    <div class="logo-badge">LIVE MARKETS · AI-POWERED</div>
+
+    <h1 class="landing-title">
+      Find your<br><span>easy bets.</span>
+    </h1>
+
+    <p class="landing-sub">
+      Tell us what you care about. We scan Polymarket in real time,
+      spot mispriced outcomes, and surface the ones that matter to you —
+      in plain English.
+    </p>
+
+    <button class="cta-btn" onclick="startOnboarding()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M5 12h14M12 5l7 7-7 7"/>
+      </svg>
+      Find my edge
+    </button>
+
+    <div class="landing-stats">
+      <div class="stat">
+        <span class="stat-val" id="live-count">—</span>
+        <span class="stat-label">Open markets</span>
+      </div>
+      <div class="stat">
+        <span class="stat-val" id="arb-count">—</span>
+        <span class="stat-label">Arb opportunities</span>
+      </div>
+      <div class="stat">
+        <span class="stat-val">Free</span>
+        <span class="stat-label">Always</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SCREEN 2: ONBOARDING CHAT ════════════════════════════════════════════ -->
+<div id="screen-chat" class="screen" style="flex-direction:column;">
+  <div class="chat-header">
+    <div class="chat-logo">Easy<span>Bets</span></div>
+    <div class="step-indicator" id="step-indicator">Step 1 of 3</div>
+  </div>
+
+  <div class="chat-body" id="chat-body"></div>
+
+  <div class="chat-input-row">
+    <input
+      class="chat-input"
+      id="chat-input"
+      placeholder="Type your answer..."
+      autocomplete="off"
+      onkeydown="if(event.key==='Enter') sendMessage()"
+    />
+    <button class="send-btn" id="send-btn" onclick="sendMessage()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<!-- ══ SCREEN 3: MARKETS FEED ═══════════════════════════════════════════════ -->
+<div id="screen-markets" class="screen" style="flex-direction:column;">
+  <div class="markets-header">
+    <div class="markets-logo">Easy<span>Bets</span></div>
+    <div id="interest-tags" style="display:flex;gap:0.4rem;flex-wrap:wrap;"></div>
+    <div class="profile-pill" onclick="restartOnboarding()">
+      <div class="profile-dot"></div>
+      Change profile
+    </div>
+  </div>
+
+  <div class="markets-body">
+    <!-- Arb section -->
+    <div id="arb-section" style="margin-bottom:2rem; display:none;">
+      <div class="section-header">
+        <div class="section-title">🔴 Arbitrage Detected</div>
+        <div class="section-count" id="arb-section-count">0 groups</div>
+      </div>
+      <div id="arb-list"></div>
+    </div>
+
+    <!-- Edge bets section -->
+    <div>
+      <div class="section-header">
+        <div class="section-title">Your Edge Bets</div>
+        <div class="section-count" id="market-count">Loading...</div>
+      </div>
+
+      <div class="filters" id="filters-row"></div>
+
+      <div id="markets-list">
+        <div class="loading-state">
+          <div class="spinner"></div>
+          <div class="loading-text">Scanning markets for your interests...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ───────────────────────────────────────────────────────────────────
+const state = {
+  profile: {
+    interests: [],
+    name: '',
+    rawAnswers: [],
+  },
+  step: 0,
+  selectedChips: [],
+  allMarkets: [],
+  activeFilter: 'all',
+};
+
+// ── Onboarding flow definition ───────────────────────────────────────────────
+const FLOW = [
+  {
+    ai: "Hey! I'm going to find prediction market bets tailored just for you. First — what topics do you actually follow? Pick everything that applies 👇",
+    chips: ["⚽ Sports", "🏀 NBA", "🏈 NFL", "⚾ MLB", "🎮 Esports",
+            "₿ Crypto", "📈 Stocks", "🏛️ Politics", "🤖 AI & Tech",
+            "🎬 Entertainment", "🌍 World Events", "🔬 Science"],
+    key: 'interests',
+    multi: true,
+    placeholder: "Or type a topic...",
+    step: "Step 1 of 3",
+  },
+  {
+    ai: (s) => `Got it — ${s.interests.slice(0,3).join(', ')} and more. Now, how do you like your bets? Are you a safe player or do you like a long shot?`,
+    chips: ["🛡️ Safe only (high chance)", "⚖️ Mix of both", "🎯 Long shots (big upside)"],
+    key: 'riskProfile',
+    multi: false,
+    placeholder: "Describe your style...",
+    step: "Step 2 of 3",
+  },
+  {
+    ai: (s) => `Perfect. Last one — anything specific happening right now you want bets on? A team, a person, an event?`,
+    chips: ["Just surprise me", "Trump & US politics", "Champions League", "Bitcoin price", "AI race", "2026 elections"],
+    key: 'specific',
+    multi: false,
+    placeholder: "Or just say 'surprise me'...",
+    step: "Step 3 of 3",
+  },
+];
+
+// ── Screen management ────────────────────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+// ── Landing ──────────────────────────────────────────────────────────────────
+async function loadLandingStats() {
+  try {
+    const r = await fetch('/api/stats');
+    const d = await r.json();
+    document.getElementById('live-count').textContent = d.open_markets?.toLocaleString() || '—';
+    document.getElementById('arb-count').textContent  = d.arb_count || '—';
+  } catch {
+    document.getElementById('live-count').textContent = '10k+';
+    document.getElementById('arb-count').textContent  = 'Live';
+  }
+}
+
+function startOnboarding() {
+  showScreen('screen-chat');
+  renderStep(0);
+}
+
+function restartOnboarding() {
+  state.step = 0;
+  state.profile = { interests: [], name: '', rawAnswers: [] };
+  state.selectedChips = [];
+  document.getElementById('chat-body').innerHTML = '';
+  showScreen('screen-chat');
+  renderStep(0);
+}
+
+loadLandingStats();
+
+// ── Chat / Onboarding ────────────────────────────────────────────────────────
+function renderStep(stepIdx) {
+  state.step = stepIdx;
+  const step = FLOW[stepIdx];
+  document.getElementById('step-indicator').textContent = step.step;
+  state.selectedChips = [];
+
+  const msg = typeof step.ai === 'function' ? step.ai(state.profile) : step.ai;
+
+  // Show typing indicator then message
+  showTyping(() => {
+    appendAIMessage(msg);
+    if (step.chips) appendChips(step.chips, step.multi, step.key);
+    const input = document.getElementById('chat-input');
+    input.placeholder = step.placeholder || 'Type your answer...';
+    input.focus();
+  });
+}
+
+function showTyping(callback) {
+  const body = document.getElementById('chat-body');
+  const typing = document.createElement('div');
+  typing.className = 'msg ai';
+  typing.id = 'typing-indicator';
+  typing.innerHTML = `
+    <div class="avatar ai">E</div>
+    <div class="bubble" style="display:flex;gap:4px;align-items:center;padding:1rem 1.1rem;">
+      <span class="typing-dot"></span>
+      <span class="typing-dot"></span>
+      <span class="typing-dot"></span>
+    </div>`;
+  body.appendChild(typing);
+  scrollChat();
+
+  setTimeout(() => {
+    typing.remove();
+    callback();
+    scrollChat();
+  }, 900);
+}
+
+function appendAIMessage(text) {
+  const body = document.getElementById('chat-body');
+  const el = document.createElement('div');
+  el.className = 'msg ai';
+  el.innerHTML = `
+    <div class="avatar ai">E</div>
+    <div class="bubble">${text}</div>`;
+  body.appendChild(el);
+}
+
+function appendUserMessage(text) {
+  const body = document.getElementById('chat-body');
+  const el = document.createElement('div');
+  el.className = 'msg user';
+  el.innerHTML = `
+    <div class="bubble">${text}</div>
+    <div class="avatar user-av">You</div>`;
+  body.appendChild(el);
+  scrollChat();
+}
+
+function appendChips(options, multi, key) {
+  const body = document.getElementById('chat-body');
+  const row = document.createElement('div');
+  row.className = 'chips-row';
+  row.id = 'chips-row';
+  options.forEach(opt => {
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    chip.textContent = opt;
+    chip.onclick = () => selectChip(chip, opt, multi, key);
+    row.appendChild(chip);
+  });
+
+  // Add confirm button for multi-select
+  if (multi) {
+    const confirm = document.createElement('div');
+    confirm.className = 'chip';
+    confirm.id = 'confirm-chip';
+    confirm.textContent = '✓ Continue';
+    confirm.style.background = 'rgba(0,230,118,0.1)';
+    confirm.style.borderColor = 'var(--accent)';
+    confirm.style.color = 'var(--accent)';
+    confirm.onclick = () => confirmMultiSelect(key);
+    row.appendChild(confirm);
+  }
+
+  body.appendChild(row);
+}
+
+function selectChip(chip, value, multi, key) {
+  const row = document.getElementById('chips-row');
+  if (!multi) {
+    // Single select — proceed immediately
+    row.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+    chip.classList.add('selected');
+    setTimeout(() => advanceStep(key, [value]), 300);
+  } else {
+    chip.classList.toggle('selected');
+    if (chip.classList.contains('selected')) {
+      state.selectedChips.push(value);
+    } else {
+      state.selectedChips = state.selectedChips.filter(v => v !== value);
+    }
+  }
+}
+
+function confirmMultiSelect(key) {
+  if (state.selectedChips.length === 0) return;
+  advanceStep(key, [...state.selectedChips]);
+}
+
+function sendMessage() {
+  const input = document.getElementById('chat-input');
+  const val = input.value.trim();
+  if (!val) return;
+  input.value = '';
+  const step = FLOW[state.step];
+  advanceStep(step.key, [val]);
+}
+
+function advanceStep(key, values) {
+  // Remove chips
+  const chipsRow = document.getElementById('chips-row');
+  if (chipsRow) chipsRow.remove();
+
+  // Store in profile
+  if (key === 'interests') {
+    state.profile.interests = values.map(v => v.replace(/^[^\s]+\s/, '').trim());
+  } else {
+    state.profile[key] = values[0];
+  }
+  state.profile.rawAnswers.push({ key, values });
+
+  // Show user's choice as a bubble
+  appendUserMessage(values.join(' · '));
+
+  const nextStep = state.step + 1;
+  if (nextStep < FLOW.length) {
+    renderStep(nextStep);
+  } else {
+    finishOnboarding();
+  }
+}
+
+function scrollChat() {
+  const body = document.getElementById('chat-body');
+  body.scrollTop = body.scrollHeight;
+}
+
+async function finishOnboarding() {
+  showTyping(() => {
+    appendAIMessage(`Perfect — I'm scanning the markets now. I'll surface the best opportunities for you in seconds. 🔍`);
+    scrollChat();
+    setTimeout(() => {
+      showScreen('screen-markets');
+      loadMarkets();
+    }, 1200);
+  });
+}
+
+// ── Markets Feed ─────────────────────────────────────────────────────────────
+async function loadMarkets() {
+  renderInterestTags();
+
+  try {
+    const r = await fetch('/api/markets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile: state.profile }),
+    });
+    const data = await r.json();
+    state.allMarkets = data.markets || [];
+    renderMarkets(state.allMarkets);
+    if (data.arb_groups?.length) renderArbGroups(data.arb_groups);
+    renderFilters();
+  } catch (err) {
+    // Fallback demo data so UI is always visible
+    renderDemoData();
+  }
+}
+
+function renderInterestTags() {
+  const container = document.getElementById('interest-tags');
+  container.innerHTML = '';
+  state.profile.interests.slice(0, 4).forEach(interest => {
+    const tag = document.createElement('div');
+    tag.className = 'interest-tag';
+    tag.textContent = interest;
+    container.appendChild(tag);
+  });
+}
+
+function renderFilters() {
+  const categories = ['all', ...new Set(state.allMarkets.map(m => m.category).filter(Boolean))];
+  const row = document.getElementById('filters-row');
+  row.innerHTML = '';
+  categories.forEach(cat => {
+    const chip = document.createElement('div');
+    chip.className = `filter-chip ${cat === 'all' ? 'active' : ''}`;
+    chip.textContent = cat === 'all' ? 'All' : cat.replace(/_/g, ' ');
+    chip.onclick = () => {
+      row.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      state.activeFilter = cat;
+      const filtered = cat === 'all' ? state.allMarkets : state.allMarkets.filter(m => m.category === cat);
+      renderMarkets(filtered);
+    };
+    row.appendChild(chip);
+  });
+}
+
+function renderMarkets(markets) {
+  const list = document.getElementById('markets-list');
+  const countEl = document.getElementById('market-count');
+
+  if (!markets || markets.length === 0) {
+    list.innerHTML = `<div class="loading-state">
+      <div style="font-size:2rem;margin-bottom:1rem;">🤔</div>
+      <div class="loading-text">No matching markets found. Try different interests.</div>
+    </div>`;
+    countEl.textContent = '0 markets';
+    return;
+  }
+
+  countEl.textContent = `${markets.length} markets`;
+  list.innerHTML = '';
+
+  markets.forEach(m => {
+    const card = document.createElement('div');
+    const edgeClass = m.edge > 0 ? 'positive' : 'negative';
+    const cardClass = m.signal_type === 'arb' ? 'overpriced'
+                    : m.edge > 0 ? 'underpriced' : 'value';
+
+    const tagType = m.signal_type === 'arb' ? 'arb'
+                  : m.edge > 0 ? 'edge' : 'value';
+    const tagLabel = m.signal_type === 'arb' ? '⚡ ARB'
+                   : m.edge > 0 ? '📈 EDGE' : '🎯 VALUE';
+
+    card.className = `market-card ${cardClass}`;
+    card.innerHTML = `
+      <div class="card-top">
+        <span class="card-tag ${tagType}">${tagLabel}</span>
+        <div class="card-question">${m.question}</div>
+      </div>
+      <div class="card-meta">
+        <div class="price-block">
+          <span class="price-label">YES</span>
+          <span class="price-val yes">${(m.yes_price * 100).toFixed(0)}¢</span>
+        </div>
+        <div class="price-block">
+          <span class="price-label">NO</span>
+          <span class="price-val no">${((1 - m.yes_price) * 100).toFixed(0)}¢</span>
+        </div>
+        ${m.base_rate != null ? `
+        <div class="price-block">
+          <span class="price-label">Historical</span>
+          <span class="price-val" style="color:var(--muted)">${(m.base_rate * 100).toFixed(0)}%</span>
+        </div>` : ''}
+        <div class="edge-badge ${edgeClass}">
+          ${m.edge > 0 ? '+' : ''}${(m.edge * 100).toFixed(1)}¢ edge
+        </div>
+      </div>
+        <div class="card-explain">${m.explanation || ''}</div>
+        <div class="card-actions">
+            <button class="action-btn yes-btn" onclick="window.open('https://polymarket.com/event/${m.slug || ''}', '_blank')">Bet YES</button>
+            <button class="action-btn no-btn" onclick="window.open('https://polymarket.com/event/${m.slug || ''}', '_blank')">Bet NO</button>
+            <button class="action-btn poly-btn" onclick="window.open('https://polymarket.com/event/${m.slug || ''}', '_blank')">View on Polymarket ↗</button>
+        </div>`;
+
+    card.onclick = () => card.classList.toggle('expanded');
+    list.appendChild(card);
+  });
+}
+
+function renderArbGroups(groups) {
+  const section = document.getElementById('arb-section');
+  const list    = document.getElementById('arb-list');
+  const countEl = document.getElementById('arb-section-count');
+
+  section.style.display = 'block';
+  countEl.textContent = `${groups.length} group${groups.length !== 1 ? 's' : ''}`;
+  list.innerHTML = '';
+
+  groups.forEach(group => {
+    const el = document.createElement('div');
+    el.className = 'arb-group';
+    const legsHtml = group.markets.map(m => `
+      <div class="arb-leg">
+        <span class="arb-price">${(m.yes_price * 100).toFixed(0)}¢</span>
+        <span class="arb-question">${m.question.substring(0, 70)}${m.question.length > 70 ? '…' : ''}</span>
+        ${group.fade_legs?.some(f => f.market_id === m.market_id) ? '<span class="arb-fade-tag">fade</span>' : ''}
+      </div>`).join('');
+
+    el.innerHTML = `
+      <div class="arb-group-title">
+        ⚡ MUTUALLY EXCLUSIVE GROUP
+        <span class="arb-sum">Sum: ${(group.total_yes * 100).toFixed(1)}¢ / 100¢ fair</span>
+      </div>
+      ${legsHtml}
+      <div style="margin-top:0.8rem;font-size:0.82rem;color:var(--muted);">${group.action}</div>`;
+    list.appendChild(el);
+  });
+}
+
+// ── Demo fallback (shown when backend isn't running) ─────────────────────────
+function renderDemoData() {
+    const demoMarkets = [
+    {
+      question: "Will the Fed cut rates at the May 2026 meeting?",
+      yes_price: 0.38, edge: -0.12, signal_type: 'value',
+      category: 'economic_rate', base_rate: 0.25,
+      slug: "fed-interest-rate-cut-may-2026", // <-- ADD THIS
+      explanation: "Historically, markets overestimate near-term rate cuts. Base rate for this question type is 25% — currently priced at 38%, suggesting NO has edge.",
+    },
+    {
+      question: "Will Bitcoin reach $120,000 before July 2026?",
+      yes_price: 0.29, edge: -0.09, signal_type: 'value',
+      category: 'crypto_price', base_rate: 0.15,
+      slug: "bitcoin-120k-july-2026", // <-- ADD THIS
+      explanation: "Specific price targets in fixed windows resolve YES only ~15% of the time historically. Market pricing implies 29% — likely overpriced.",
+    },
+    {
+      question: "Will Mbappe score in the next Champions League match?",
+      yes_price: 0.44, edge: 0.06, signal_type: 'edge',
+      category: 'sports_win', base_rate: 0.50,
+      slug: "2026-ncaa-tournament-winner", // <-- ADD THIS
+      explanation: "Top strikers in UCL knockout rounds score at a ~50% rate — slightly above the current market price. Small YES edge.",
+    },
+  ];
+
+  const demoArb = [{
+    total_yes: 1.18, edge: 0.18,
+    action: "Sum of YES prices is 118¢ — 18 cents over fair. Fade the most overpriced legs.",
+    fade_legs: [],
+    markets: [
+      { market_id: '1', question: "Will Trump nominate Kevin Warsh as Fed chair?", yes_price: 0.42 },
+      { market_id: '2', question: "Will Trump nominate Larry Summers as Fed chair?", yes_price: 0.38 },
+      { market_id: '3', question: "Will Trump nominate Jerome Powell for another term?", yes_price: 0.38 },
+    ],
+  }];
+
+  state.allMarkets = demoMarkets;
+  renderMarkets(demoMarkets);
+  renderArbGroups(demoArb);
+  renderFilters();
+  document.getElementById('market-count').textContent = `${demoMarkets.length} markets (demo)`;
+}
+</script>
+</body>
+</html>
