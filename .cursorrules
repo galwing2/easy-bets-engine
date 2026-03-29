@@ -1,0 +1,6 @@
+This is a Prediction Market Aggregator called EasyBets.
+- Backend: FastAPI (Python 3.8+).
+- Frontend: Single-file HTML/JS/CSS (index.html).
+- Database: MongoDB (via Motor/PyMongo).
+- API: Polymarket Gamma API.
+Always ensure that session_id persistence is handled via localStorage in the frontend and matched against the 'sessions' collection in MongoDB.

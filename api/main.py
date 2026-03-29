@@ -1,344 +1,739 @@
 """
-api/main.py
------------
-FastAPI backend for EasyBets.
-Serves the frontend and exposes:
-  GET  /             → index.html
-  GET  /api/stats    → live market counts
-  POST /api/markets  → personalized scored markets for a user profile
+api/main.py  —  single process, single command
+-----------------------------------------------
+Run:   uvicorn api.main:app --reload
+Open:  http://localhost:8000
 
-Run locally:
-  uvicorn api.main:app --reload --port 8000
-
-On EC2:
-  uvicorn api.main:app --host 0.0.0.0 --port 8000
+Everything is served from here. No Streamlit. No second terminal.
+The HTML at GET / contains the full UI. Sessions are stored in MongoDB
+and the session_id is kept in the browser's localStorage so every
+page reload skips onboarding for returning users.
 """
 
-import os
-import re
-import json
-import time
-import asyncio
-import requests
-from pathlib import Path
-from datetime import datetime
+import os, uuid, json, joblib
+import numpy as np
+import requests as req
+from datetime import datetime, timezone
 from typing import Optional
-from collections import defaultdict
-from difflib import SequenceMatcher
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from pymongo import MongoClient, ReturnDocument
 from dotenv import load_dotenv
 
 load_dotenv()
 
-app = FastAPI(title="EasyBets API")
+app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# ── MongoDB ───────────────────────────────────────────────────────────────────
+_client = None
+def get_db():
+    global _client
+    if not _client:
+        uri = os.getenv("MONGO_URI")
+        print(f"Connecting to MongoDB at: {uri}") # Add this for debugging
+        _client = MongoClient(uri)
+    return _client["easy_bets"]
 
-GAMMA_BASE   = "https://gamma-api.polymarket.com"
-PAGE_SIZE    = 100
-BASE_RATES_PATH = Path("models/base_rates.json")
+# ── ML model ──────────────────────────────────────────────────────────────────
+_model = None
+@app.on_event("startup")
+def _load():
+    global _model
+    p = "model/xgb_calibrated.joblib"
+    if os.path.exists(p):
+        _model = joblib.load(p)
+        print("✅ model loaded")
 
+def _bucket(p):
+    return 0 if p<.1 else 1 if p<.3 else 2 if p<.7 else 3 if p<.9 else 4
 
-# ── Load base rates ────────────────────────────────────────────────────────────
-def load_base_rates() -> dict:
-    if BASE_RATES_PATH.exists():
-        with open(BASE_RATES_PATH) as f:
-            return json.load(f)
-    # Hardcoded fallbacks if file doesn't exist yet
-    return {
-        "crypto_price":        {"yes_rate": 0.05, "n_markets": 11},
-        "economic_threshold":  {"yes_rate": 0.03, "n_markets": 22},
-        "election_candidate":  {"yes_rate": 0.04, "n_markets": 25},
-        "ai_model":            {"yes_rate": 0.09, "n_markets": 11},
-        "economic_rate":       {"yes_rate": 0.25, "n_markets": 4},
-        "other":               {"yes_rate": 0.03, "n_markets": 88},
-    }
+def _parse(v):
+    if isinstance(v, str):
+        try: return json.loads(v)
+        except: return []
+    return v if isinstance(v, list) else []
 
-BASE_RATES = load_base_rates()
-
-
-# ── Category classifier ────────────────────────────────────────────────────────
-CATEGORIES = [
-    ("election_win",         [r"win.*election", r"elected", r"win.*primary"]),
-    ("election_candidate",   [r"nominee", r"nominate", r"candidate"]),
-    ("political_action",     [r"sign.*bill", r"pass.*law", r"veto", r"resign", r"impeach"]),
-    ("political_appoint",    [r"appoint", r"nominate.*(?:secretary|judge|chair|director)"]),
-    ("legal_verdict",        [r"convicted", r"acquitted", r"guilty", r"indicted", r"arrested"]),
-    ("economic_rate",        [r"interest rate", r"fed.*rate", r"rate.*cut", r"rate.*hike"]),
-    ("economic_threshold",   [r"gdp", r"inflation", r"recession", r"above \d", r"below \d",
-                               r"reach \$", r"hit \$", r"exceed"]),
-    ("crypto_price",         [r"bitcoin", r"ethereum", r"btc", r"eth", r"crypto", r"\$.*coin"]),
-    ("sports_championship",  [r"championship", r"super bowl", r"world series", r"nba finals",
-                               r"stanley cup", r"world cup", r"champions league"]),
-    ("sports_win",           [r"win.*game", r"beat ", r"defeat", r"playoffs"]),
-    ("sports_award",         [r"mvp", r"heisman", r"award", r"ballon"]),
-    ("tech_product",         [r"release", r"launch", r"announce.*(?:product|model|version)"]),
-    ("tech_company",         [r"ipo", r"acquisition", r"merger", r"bankrupt", r"layoff"]),
-    ("ai_model",             [r"gpt", r"claude", r"gemini", r"llm", r"ai model"]),
-    ("geopolitical_conflict",[r"war", r"ceasefire", r"invasion", r"military", r"sanction"]),
-    ("deadline_by_date",     [r"by (?:january|february|march|april|may|june|july|august|"
-                               r"september|october|november|december)",
-                               r"before \d{4}", r"by end of", r"this year"]),
-    ("other",                [r".*"]),
-]
-
-def classify(question: str) -> str:
-    q = question.lower()
-    for label, patterns in CATEGORIES:
-        for pat in patterns:
-            if re.search(pat, q):
-                return label
-    return "other"
-
-
-# ── Interest → category mapping ────────────────────────────────────────────────
-INTEREST_MAP = {
-    "sports":       ["sports_win", "sports_championship", "sports_award"],
-    "nba":          ["sports_win", "sports_championship", "sports_award"],
-    "nfl":          ["sports_win", "sports_championship", "sports_award"],
-    "mlb":          ["sports_win", "sports_championship", "sports_award"],
-    "esports":      ["sports_win", "tech_product"],
-    "crypto":       ["crypto_price", "economic_threshold"],
-    "bitcoin":      ["crypto_price"],
-    "stocks":       ["economic_threshold", "economic_rate", "tech_company"],
-    "politics":     ["election_win", "election_candidate", "political_action", "political_appoint"],
-    "ai":           ["ai_model", "tech_product", "tech_company"],
-    "tech":         ["ai_model", "tech_product", "tech_company"],
-    "entertainment":["other"],
-    "world events": ["geopolitical_conflict", "deadline_by_date"],
-    "science":      ["other"],
-    "champions league": ["sports_championship", "sports_win"],
-    "trump":        ["political_action", "political_appoint", "election_candidate"],
-    "elections":    ["election_win", "election_candidate"],
-}
-
-def interests_to_categories(interests: list) -> list:
-    cats = set()
-    for interest in interests:
-        key = interest.lower().strip().replace("& ", "")
-        for map_key, map_cats in INTEREST_MAP.items():
-            if map_key in key or key in map_key:
-                cats.update(map_cats)
-    if not cats:
-        cats = {"other"}
-    return list(cats)
-
-
-# ── Polymarket fetcher ─────────────────────────────────────────────────────────
-def _safe_parse(val):
-    if isinstance(val, str):
-        try:
-            return json.loads(val)
-        except Exception:
-            return []
-    return val if isinstance(val, list) else []
-
-def fetch_open_markets(pages: int = 5) -> list:
-    markets = []
-    for page in range(pages):
-        url = (f"{GAMMA_BASE}/events?closed=false&limit={PAGE_SIZE}"
-               f"&offset={page*PAGE_SIZE}&order=volume&ascending=false")
-        try:
-            r = requests.get(url, timeout=8)
-            r.raise_for_status()
-            events = r.json()
-        except Exception:
-            break
-
-        for event in events:
-            for market in event.get("markets", []):
-                outcomes = _safe_parse(market.get("outcomes", []))
-                prices   = _safe_parse(market.get("outcomePrices", []))
-                if "Yes" not in outcomes or "No" not in outcomes:
-                    continue
-                try:
-                    prices_f = [float(p) for p in prices]
-                except Exception:
-                    continue
-                if len(prices_f) != 2:
-                    continue
-                yes_idx   = outcomes.index("Yes")
-                yes_price = prices_f[yes_idx]
-                if yes_price >= 0.97 or yes_price <= 0.03:
-                    continue
-                markets.append({
-                    "market_id":   market.get("id"),
-                    "question":    market.get("question", "").strip(),
-                    "yes_price":   yes_price,
-                    "volume":      float(market.get("volume") or 0),
-                    "event_id":    event.get("id"),
-                    "category":    classify(market.get("question", "")),
-                })
-        time.sleep(0.05)
-
-    return markets
-
-
-# ── Scoring ────────────────────────────────────────────────────────────────────
-def compute_edge(market: dict) -> dict:
-    """
-    Compare market's current YES price to historical base rate for its category.
-    edge = base_rate - yes_price
-      positive → YES is underpriced (bet YES)
-      negative → YES is overpriced (bet NO)
-    """
-    cat  = market.get("category", "other")
-    br   = BASE_RATES.get(cat, BASE_RATES.get("other", {"yes_rate": 0.5}))
-    base = br["yes_rate"]
-    edge = base - market["yes_price"]
-
-    m = dict(market)
-    m["base_rate"]    = round(base, 4)
-    m["edge"]         = round(edge, 4)
-    m["signal_type"]  = "edge"
-    m["explanation"]  = generate_explanation(m, cat, base, edge)
-    return m
-
-def generate_explanation(market: dict, cat: str, base_rate: float, edge: float) -> str:
-    price_pct = int(market["yes_price"] * 100)
-    base_pct  = int(base_rate * 100)
-    q = market["question"]
-
-    if edge < -0.10:
-        return (f"Historically, '{cat.replace('_',' ')}' markets resolve YES only "
-                f"~{base_pct}% of the time. This one is priced at {price_pct}¢ — "
-                f"suggesting it's overpriced. Betting NO has edge.")
-    elif edge > 0.10:
-        return (f"Base rate for this market type is ~{base_pct}%. "
-                f"At {price_pct}¢, YES looks underpriced. "
-                f"The crowd may be underestimating this outcome.")
-    elif abs(edge) < 0.05:
-        return f"This market looks fairly priced relative to historical base rates ({base_pct}%)."
-    else:
-        direction = "slightly overpriced" if edge < 0 else "slight value on YES"
-        return (f"Base rate: ~{base_pct}%. Current price: {price_pct}¢. "
-                f"There's {direction} here.")
-
-
-# ── Arb detection ──────────────────────────────────────────────────────────────
-def detect_arb_groups(markets: list, threshold: float = 0.05) -> list:
-    by_event = defaultdict(list)
-    for m in markets:
-        if m.get("event_id"):
-            by_event[m["event_id"]].append(m)
-
-    opps = []
-    for event_id, members in by_event.items():
-        if len(members) < 2:
-            continue
-        total = sum(m["yes_price"] for m in members)
-        edge  = total - 1.0
-        if abs(edge) < threshold:
-            continue
-
-        fair = 1.0 / len(members)
-        fade = [m for m in members if m["yes_price"] > fair * 1.1] if edge > 0 else []
-
-        opps.append({
-            "type":       "OVERPRICED" if edge > 0 else "UNDERPRICED",
-            "total_yes":  round(total, 4),
-            "edge":       round(edge, 4),
-            "action":     (
-                f"Sum of YES prices is {int(total*100)}¢ — {int(abs(edge)*100)} cents "
-                f"{'over' if edge > 0 else 'under'} fair value. "
-                f"{'Fade the marked legs.' if edge > 0 else 'Buy all legs — one is guaranteed to resolve YES.'}"
-            ),
-            "markets":    sorted(members, key=lambda x: x["yes_price"], reverse=True),
-            "fade_legs":  fade,
-        })
-
-    return sorted(opps, key=lambda x: abs(x["edge"]), reverse=True)[:5]
-
-
-# ── Routes ─────────────────────────────────────────────────────────────────────
-@app.get("/", response_class=HTMLResponse)
-async def serve_frontend():
-    html_path = Path("index.html")
-    if html_path.exists():
-        return HTMLResponse(content=html_path.read_text())
-    return HTMLResponse(content="<h1>EasyBets — frontend not found</h1>", status_code=404)
-
-
-@app.get("/api/stats")
-async def stats():
-    try:
-        r = requests.get(
-            f"{GAMMA_BASE}/events?closed=false&limit=1",
-            timeout=5
-        )
-        # Polymarket doesn't return total count easily; use a proxy
-        open_markets = 10000  # known approximate
-        return {"open_markets": open_markets, "arb_count": "Live", "status": "ok"}
-    except Exception:
-        return {"open_markets": "10k+", "arb_count": "Live", "status": "ok"}
-
-
+# ── Session endpoints ─────────────────────────────────────────────────────────
 class Profile(BaseModel):
-    interests: list = []
-    riskProfile: Optional[str] = None
-    specific: Optional[str] = None
-    rawAnswers: list = []
+    interests: list[str]
+    risk_profile: Optional[str] = "mix"
+    specific: Optional[str] = ""
+    name: Optional[str] = ""
 
-class MarketsRequest(BaseModel):
-    profile: Profile
+@app.post("/session/start")
+def session_start():
+    sid = str(uuid.uuid4())
+    get_db()["sessions"].insert_one({
+        "session_id": sid,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "profile": None,
+        "done": False,
+    })
+    return {"session_id": sid}
 
+@app.get("/session/{sid}")
+def session_get(sid: str):
+    doc = get_db()["sessions"].find_one({"session_id": sid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "not found")
+    return doc
+
+@app.post("/session/{sid}/profile")
+def session_save(sid: str, p: Profile):
+    doc = get_db()["sessions"].find_one_and_update(
+        {"session_id": sid},
+        {"$set": {"profile": p.model_dump(), "done": True,
+                  "updated_at": datetime.now(timezone.utc).isoformat()}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not doc:
+        raise HTTPException(404, "not found")
+    return {"session_id": sid, "profile": doc["profile"]}
+
+@app.delete("/session/{sid}/profile")
+def session_reset(sid: str):
+    get_db()["sessions"].update_one(
+        {"session_id": sid},
+        {"$set": {"profile": None, "done": False}}
+    )
+    return {"reset": True}
+
+# ── Markets ───────────────────────────────────────────────────────────────────
+GAMMA = "https://gamma-api.polymarket.com/events?closed=false&limit=50&order=volume&ascending=false"
 
 @app.post("/api/markets")
-async def get_markets(req: MarketsRequest):
-    profile = req.profile
+def markets(body: dict):
+    profile   = body.get("profile", {})
+    interests = [i.lower() for i in profile.get("interests", [])]
 
-    # 1. Fetch live markets
-    all_markets = fetch_open_markets(pages=5)
+    try:
+        events = req.get(GAMMA, timeout=8).json()
+    except Exception as e:
+        raise HTTPException(502, str(e))
 
-    # 2. Determine relevant categories from interests
-    target_cats = interests_to_categories(profile.interests)
+    out = []
+    for event in events:
+        title = event.get("title", "").lower()
+        # filter by interests when set
+        if interests and not any(kw in title for kw in interests):
+            continue
+        for m in event.get("markets", []):
+            outcomes = _parse(m.get("outcomes", []))
+            prices   = _parse(m.get("outcomePrices", []))
+            if "Yes" not in outcomes or len(prices) != 2:
+                continue
+            try:
+                pf = [float(x) for x in prices]
+            except:
+                continue
+            yi = outcomes.index("Yes")
+            yp = pf[yi]
+            if yp >= 0.97 or yp <= 0.03:
+                continue
 
-    # 3. Filter to relevant markets (always include some "other" for variety)
-    relevant = [m for m in all_markets if m["category"] in target_cats]
+            edge, ml, signal = None, None, "MODEL_UNAVAILABLE"
+            if _model:
+                feat = np.array([[yp, 0., 0., 0.05, float(_bucket(yp)), 0.5]])
+                ml   = round(float(_model.predict_proba(feat)[0][1]), 4)
+                edge = round(ml - yp, 4)
+                signal = "BUY_YES" if edge > .03 else "BUY_NO" if edge < -.03 else "NEUTRAL"
 
-    # If too few, add high-volume markets from any category
-    if len(relevant) < 10:
-        extra = [m for m in all_markets if m not in relevant]
-        extra = sorted(extra, key=lambda x: x["volume"], reverse=True)[:20]
-        relevant.extend(extra)
+            out.append({
+                "question":    m.get("question", event.get("title", "")),
+                "yes_price":   yp,
+                "no_price":    pf[1 - yi],
+                "volume":      float(m.get("volume", 0) or 0),
+                "end_date":    (m.get("endDate") or "")[:10],
+                "slug":        event.get("slug", ""),
+                "base_rate":   ml,
+                "edge":        edge if edge is not None else (yp - 0.5),
+                "signal_type": "edge" if (edge or 0) > 0 else "value",
+                "explanation": f"Model probability: {(ml*100):.1f}%" if ml else "No model loaded — run run_pipeline.py",
+                "category":    (event.get("tags") or [{}])[0].get("label", "general") if event.get("tags") else "general",
+            })
 
-    # 4. Score each market
-    scored = [compute_edge(m) for m in relevant]
+    out.sort(key=lambda x: abs(x.get("edge") or 0), reverse=True)
 
-    # 5. Filter by edge significance
-    edgy = [m for m in scored if abs(m["edge"]) >= 0.08]
+    # Simple arb detection: groups where YES prices sum > 1.05
+    arb_groups = []
+    by_event: dict = {}
+    for event in events:
+        eid = event.get("id")
+        ms  = []
+        for m in event.get("markets", []):
+            outcomes = _parse(m.get("outcomes", []))
+            prices   = _parse(m.get("outcomePrices", []))
+            if "Yes" in outcomes and len(prices) == 2:
+                try:
+                    yi = outcomes.index("Yes")
+                    ms.append({"market_id": m.get("id"), "question": m.get("question",""), "yes_price": float(prices[yi])})
+                except: pass
+        if len(ms) >= 2:
+            by_event[eid] = ms
+    for eid, ms in by_event.items():
+        total = sum(m["yes_price"] for m in ms)
+        if total > 1.05:
+            arb_groups.append({
+                "markets": ms, "total_yes": total,
+                "action": f"Sum of YES prices is {total*100:.1f}¢ — {(total-1)*100:.1f}¢ over fair. Fade overpriced legs.",
+                "fade_legs": [],
+            })
 
-    # 6. Apply risk profile filter
-    risk = (profile.riskProfile or "").lower()
-    if "safe" in risk:
-        edgy = [m for m in edgy if 0.35 <= m["yes_price"] <= 0.65]
-    elif "long shot" in risk or "long shots" in risk:
-        edgy = [m for m in edgy if m["yes_price"] < 0.25 or m["yes_price"] > 0.75]
+    return {"markets": out[:30], "arb_groups": arb_groups[:5]}
 
-    # 7. Sort by abs edge, limit
-    edgy = sorted(edgy, key=lambda x: abs(x["edge"]), reverse=True)[:30]
+@app.get("/api/stats")
+def stats():
+    try:
+        events = req.get(GAMMA, timeout=5).json()
+        return {"open_markets": sum(len(e.get("markets",[])) for e in events), "arb_count": "Live"}
+    except:
+        return {"open_markets": "10k+", "arb_count": "Live"}
 
-    # 8. Detect arb groups (from full market list)
-    arb_groups = detect_arb_groups(all_markets)
-
-    return {
-        "markets":    edgy,
-        "arb_groups": arb_groups,
-        "total_scanned": len(all_markets),
-        "profile_categories": target_cats,
-        "generated_at": datetime.utcnow().isoformat(),
-    }
+# ── Serve the HTML app at GET / ───────────────────────────────────────────────
+@app.get("/", response_class=HTMLResponse)
+def root():
+    return HTMLResponse(HTML)
 
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("api.main:app", host="0.0.0.0", port=8000, reload=True)
+# ─────────────────────────────────────────────────────────────────────────────
+# THE FULL HTML APP  (your existing UI + session persistence wired in)
+# ─────────────────────────────────────────────────────────────────────────────
+HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EasyBets — Find Your Edge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:#0a0c10; --surface:#111318; --surface2:#181c24; --border:#1f2433;
+  --accent:#00e676; --accent2:#00b0ff; --danger:#ff4444; --warn:#ffb300;
+  --text:#e8ecf4; --muted:#5a6180;
+  --mono:'DM Mono',monospace; --sans:'Syne',sans-serif;
+}
+html { font-size:16px; scroll-behavior:smooth; }
+body { background:var(--bg); color:var(--text); font-family:var(--sans); min-height:100vh; overflow-x:hidden; }
+body::before {
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:999; opacity:.4;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+}
+
+.screen { display:none; min-height:100vh; animation:fadeIn .4s ease; }
+.screen.active { display:flex; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+
+/* LANDING */
+#screen-landing { flex-direction:column; align-items:center; justify-content:center; position:relative; padding:2rem; }
+.grid-bg {
+  position:absolute; inset:0;
+  background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);
+  background-size:48px 48px;
+  mask-image:radial-gradient(ellipse 80% 70% at 50% 50%,black 20%,transparent 100%);
+  opacity:.4;
+}
+.glow-orb { position:absolute; border-radius:50%; filter:blur(120px); pointer-events:none; }
+.glow-orb.green { width:500px; height:500px; background:rgba(0,230,118,.08); top:-100px; left:-100px; }
+.glow-orb.blue  { width:400px; height:400px; background:rgba(0,176,255,.06); bottom:-80px; right:-80px; }
+.landing-content { position:relative; z-index:1; text-align:center; max-width:640px; }
+.logo-badge {
+  display:inline-flex; align-items:center; gap:.5rem;
+  background:var(--surface); border:1px solid var(--border); border-radius:99px;
+  padding:.35rem 1rem; font-family:var(--mono); font-size:.75rem; color:var(--accent);
+  letter-spacing:.08em; margin-bottom:2rem; animation:fadeIn .6s ease .1s both;
+}
+.logo-badge::before { content:''; width:6px; height:6px; background:var(--accent); border-radius:50%; animation:pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.8)} }
+.landing-title { font-size:clamp(3rem,8vw,5.5rem); font-weight:800; line-height:1; letter-spacing:-.03em; margin-bottom:1.5rem; animation:fadeIn .6s ease .2s both; }
+.landing-title span { background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+.landing-sub { font-size:1.15rem; color:var(--muted); line-height:1.6; margin-bottom:2.5rem; animation:fadeIn .6s ease .3s both; }
+.cta-btn {
+  display:inline-flex; align-items:center; gap:.6rem;
+  background:var(--accent); color:#000; font-family:var(--sans); font-weight:700;
+  font-size:1rem; padding:.9rem 2.2rem; border-radius:8px; border:none; cursor:pointer;
+  transition:transform .15s,box-shadow .15s; animation:fadeIn .6s ease .4s both;
+}
+.cta-btn:hover { transform:translateY(-2px); box-shadow:0 8px 32px rgba(0,230,118,.3); }
+.landing-stats { display:flex; gap:2.5rem; justify-content:center; margin-top:3.5rem; animation:fadeIn .6s ease .5s both; }
+.stat { text-align:center; }
+.stat-val { font-family:var(--mono); font-size:1.6rem; font-weight:500; color:var(--text); display:block; }
+.stat-label { font-size:.72rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; }
+
+/* CHAT */
+#screen-chat { flex-direction:column; align-items:center; justify-content:flex-start; }
+.chat-header {
+  width:100%; padding:1.2rem 2rem; border-bottom:1px solid var(--border);
+  display:flex; align-items:center; gap:1rem; background:var(--surface);
+  position:sticky; top:0; z-index:10;
+}
+.chat-logo { font-weight:800; font-size:1.1rem; letter-spacing:-.02em; }
+.chat-logo span { color:var(--accent); }
+.step-indicator { margin-left:auto; font-family:var(--mono); font-size:.72rem; color:var(--muted); }
+.chat-body { flex:1; width:100%; max-width:680px; margin:0 auto; padding:2rem 1.5rem; display:flex; flex-direction:column; gap:1.2rem; min-height:calc(100vh - 140px); }
+.msg { display:flex; gap:.8rem; align-items:flex-start; animation:msgIn .3s ease; }
+@keyframes msgIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+.msg.user { flex-direction:row-reverse; }
+.avatar { width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:.8rem; flex-shrink:0; }
+.avatar.ai { background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#000; font-weight:700; }
+.avatar.user-av { background:var(--surface2); border:1px solid var(--border); color:var(--muted); }
+.bubble { max-width:75%; padding:.85rem 1.1rem; border-radius:16px; font-size:.95rem; line-height:1.55; }
+.msg.ai   .bubble { background:var(--surface); border:1px solid var(--border); border-top-left-radius:4px; }
+.msg.user .bubble { background:var(--accent); color:#000; font-weight:500; border-top-right-radius:4px; }
+.chips-row { display:flex; flex-wrap:wrap; gap:.5rem; padding-left:42px; animation:msgIn .3s ease .15s both; }
+.chip { background:var(--surface); border:1px solid var(--border); color:var(--text); padding:.45rem .9rem; border-radius:99px; font-size:.82rem; cursor:pointer; font-family:var(--sans); transition:border-color .15s,color .15s,background .15s; }
+.chip:hover,.chip.selected { border-color:var(--accent); color:var(--accent); background:rgba(0,230,118,.06); }
+.chat-input-row { width:100%; max-width:680px; margin:0 auto; padding:1rem 1.5rem 1.5rem; display:flex; gap:.6rem; align-items:center; }
+.chat-input { flex:1; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:.8rem 1.1rem; color:var(--text); font-family:var(--sans); font-size:.9rem; outline:none; transition:border-color .15s; }
+.chat-input:focus { border-color:var(--accent); }
+.chat-input::placeholder { color:var(--muted); }
+.send-btn { background:var(--accent); color:#000; border:none; border-radius:10px; width:42px; height:42px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:opacity .15s,transform .15s; flex-shrink:0; }
+.send-btn:hover { transform:scale(1.05); }
+.typing-dot { display:inline-block; width:6px; height:6px; background:var(--muted); border-radius:50%; animation:blink 1.2s infinite; }
+.typing-dot:nth-child(2){animation-delay:.2s} .typing-dot:nth-child(3){animation-delay:.4s}
+@keyframes blink { 0%,80%,100%{opacity:.2} 40%{opacity:1} }
+
+/* MARKETS */
+#screen-markets { flex-direction:column; align-items:stretch; }
+.markets-header { padding:1.2rem 2rem; border-bottom:1px solid var(--border); background:var(--surface); display:flex; align-items:center; gap:1rem; position:sticky; top:0; z-index:10; }
+.markets-logo { font-weight:800; font-size:1.1rem; letter-spacing:-.02em; }
+.markets-logo span { color:var(--accent); }
+.profile-pill { margin-left:auto; display:flex; align-items:center; gap:.5rem; background:var(--surface2); border:1px solid var(--border); border-radius:99px; padding:.3rem .8rem .3rem .3rem; font-size:.78rem; color:var(--muted); cursor:pointer; transition:border-color .15s; }
+.profile-pill:hover { border-color:var(--accent); color:var(--accent); }
+.profile-dot { width:24px; height:24px; background:linear-gradient(135deg,var(--accent),var(--accent2)); border-radius:50%; }
+.markets-body { max-width:900px; margin:0 auto; padding:2rem 1.5rem; width:100%; }
+.section-header { display:flex; align-items:baseline; gap:.8rem; margin-bottom:1.5rem; }
+.section-title { font-size:1.3rem; font-weight:700; letter-spacing:-.02em; }
+.section-count { font-family:var(--mono); font-size:.72rem; color:var(--muted); background:var(--surface); border:1px solid var(--border); padding:.2rem .5rem; border-radius:4px; }
+.filters { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:1.5rem; }
+.filter-chip { background:var(--surface); border:1px solid var(--border); color:var(--muted); padding:.35rem .8rem; border-radius:6px; font-size:.78rem; cursor:pointer; transition:all .15s; font-family:var(--sans); }
+.filter-chip.active { background:rgba(0,230,118,.1); border-color:var(--accent); color:var(--accent); }
+.market-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1.25rem 1.4rem; margin-bottom:.8rem; transition:border-color .2s,transform .15s; cursor:pointer; position:relative; overflow:hidden; }
+.market-card::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:3px 0 0 3px; }
+.market-card.overpriced::before  { background:var(--danger); }
+.market-card.underpriced::before { background:var(--accent); }
+.market-card.value::before       { background:var(--warn); }
+.market-card:hover { border-color:var(--muted); transform:translateY(-1px); }
+.card-top { display:flex; align-items:flex-start; gap:1rem; margin-bottom:.8rem; }
+.card-tag { display:inline-flex; align-items:center; gap:.3rem; padding:.2rem .55rem; border-radius:4px; font-family:var(--mono); font-size:.65rem; letter-spacing:.06em; text-transform:uppercase; flex-shrink:0; margin-top:2px; }
+.card-tag.arb   { background:rgba(255,68,68,.12); color:var(--danger); border:1px solid rgba(255,68,68,.2); }
+.card-tag.edge  { background:rgba(0,230,118,.1);  color:var(--accent); border:1px solid rgba(0,230,118,.2); }
+.card-tag.value { background:rgba(255,179,0,.1);  color:var(--warn);   border:1px solid rgba(255,179,0,.2); }
+.card-question { font-size:.98rem; font-weight:600; line-height:1.45; letter-spacing:-.01em; flex:1; }
+.card-meta { display:flex; align-items:center; gap:1.2rem; flex-wrap:wrap; }
+.price-block { display:flex; flex-direction:column; gap:.1rem; }
+.price-label { font-family:var(--mono); font-size:.62rem; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; }
+.price-val { font-family:var(--mono); font-size:1.05rem; font-weight:500; }
+.price-val.yes { color:var(--accent); }
+.price-val.no  { color:var(--danger); }
+.edge-badge { margin-left:auto; padding:.4rem .8rem; border-radius:8px; font-family:var(--mono); font-size:.8rem; font-weight:500; }
+.edge-badge.positive { background:rgba(0,230,118,.12); color:var(--accent); }
+.edge-badge.negative { background:rgba(255,68,68,.12);  color:var(--danger); }
+.card-explain { margin-top:.8rem; padding-top:.8rem; border-top:1px solid var(--border); font-size:.83rem; color:var(--muted); line-height:1.5; font-style:italic; display:none; }
+.market-card.expanded .card-explain { display:block; }
+.card-actions { margin-top:.8rem; display:none; gap:.5rem; }
+.market-card.expanded .card-actions { display:flex; }
+.action-btn { padding:.45rem 1rem; border-radius:6px; font-size:.8rem; font-family:var(--sans); font-weight:600; cursor:pointer; border:none; transition:opacity .15s; }
+.action-btn:hover { opacity:.85; }
+.action-btn.yes-btn { background:var(--accent); color:#000; }
+.action-btn.no-btn  { background:var(--danger);  color:#fff; }
+.action-btn.poly-btn { background:transparent; border:1px solid var(--border); color:var(--muted); }
+.loading-state { text-align:center; padding:4rem 2rem; }
+.spinner { width:36px; height:36px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite; margin:0 auto 1rem; }
+@keyframes spin { to{transform:rotate(360deg)} }
+.loading-text { font-family:var(--mono); font-size:.78rem; color:var(--muted); letter-spacing:.05em; }
+.arb-group { background:var(--surface); border:1px solid rgba(255,68,68,.25); border-radius:12px; padding:1.25rem 1.4rem; margin-bottom:.8rem; }
+.arb-group-title { font-size:.72rem; font-family:var(--mono); color:var(--danger); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.8rem; display:flex; align-items:center; gap:.5rem; }
+.arb-sum { margin-left:auto; font-size:.9rem; color:var(--text); }
+.arb-leg { display:flex; align-items:center; gap:.8rem; padding:.5rem 0; border-bottom:1px solid var(--border); font-size:.85rem; }
+.arb-leg:last-child { border-bottom:none; }
+.arb-price { font-family:var(--mono); font-size:.85rem; color:var(--danger); flex-shrink:0; width:42px; text-align:right; }
+.arb-question { flex:1; color:var(--text); }
+.interest-tag { background:rgba(0,230,118,.08); border:1px solid rgba(0,230,118,.2); color:var(--accent); padding:.25rem .6rem; border-radius:99px; font-size:.72rem; font-family:var(--mono); }
+@media(max-width:600px){.landing-stats{gap:1.5rem} .card-meta{gap:.8rem} .chat-body{padding:1.2rem 1rem}}
+</style>
+</head>
+<body>
+
+<!-- SCREEN 1: LANDING -->
+<div id="screen-landing" class="screen active">
+  <div class="grid-bg"></div>
+  <div class="glow-orb green"></div>
+  <div class="glow-orb blue"></div>
+  <div class="landing-content">
+    <div class="logo-badge">LIVE MARKETS · AI-POWERED</div>
+    <h1 class="landing-title">Find your<br><span>easy bets.</span></h1>
+    <p class="landing-sub">Tell us what you care about. We scan Polymarket in real time, spot mispriced outcomes, and surface the ones that matter to you — in plain English.</p>
+    <button class="cta-btn" onclick="startOnboarding()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      Find my edge
+    </button>
+    <div class="landing-stats">
+      <div class="stat"><span class="stat-val" id="live-count">—</span><span class="stat-label">Open markets</span></div>
+      <div class="stat"><span class="stat-val" id="arb-count">—</span><span class="stat-label">Arb opportunities</span></div>
+      <div class="stat"><span class="stat-val">Free</span><span class="stat-label">Always</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN 2: CHAT -->
+<div id="screen-chat" class="screen" style="flex-direction:column">
+  <div class="chat-header">
+    <div class="chat-logo">Easy<span>Bets</span></div>
+    <div class="step-indicator" id="step-indicator">Step 1 of 3</div>
+  </div>
+  <div class="chat-body" id="chat-body"></div>
+  <div class="chat-input-row">
+    <input class="chat-input" id="chat-input" placeholder="Type your answer..." autocomplete="off" onkeydown="if(event.key==='Enter')sendMessage()"/>
+    <button class="send-btn" onclick="sendMessage()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- SCREEN 3: MARKETS -->
+<div id="screen-markets" class="screen" style="flex-direction:column">
+  <div class="markets-header">
+    <div class="markets-logo">Easy<span>Bets</span></div>
+    <div id="interest-tags" style="display:flex;gap:.4rem;flex-wrap:wrap;"></div>
+    <div class="profile-pill" onclick="resetProfile()">
+      <div class="profile-dot"></div>
+      Change profile
+    </div>
+  </div>
+  <div class="markets-body">
+    <div id="arb-section" style="margin-bottom:2rem;display:none">
+      <div class="section-header">
+        <div class="section-title">🔴 Arbitrage Detected</div>
+        <div class="section-count" id="arb-section-count">0 groups</div>
+      </div>
+      <div id="arb-list"></div>
+    </div>
+    <div>
+      <div class="section-header">
+        <div class="section-title">Your Edge Bets</div>
+        <div class="section-count" id="market-count">Loading...</div>
+      </div>
+      <div class="filters" id="filters-row"></div>
+      <div id="markets-list">
+        <div class="loading-state"><div class="spinner"></div><div class="loading-text">Scanning markets...</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+const S = {
+  session: null,   // { session_id, profile, done }
+  step: 0,
+  selectedChips: [],
+  allMarkets: [],
+  activeFilter: 'all',
+};
+
+// ─── Session helpers ──────────────────────────────────────────────────────────
+async function initSession() {
+  const sid = localStorage.getItem('ebs_sid');
+  if (sid) {
+    try {
+      const r = await fetch('/session/' + sid);
+      if (r.ok) {
+        S.session = await r.json();
+        // If profile is done, skip EVERYTHING and go to markets
+        if (S.session.done && S.session.profile) {
+          // Force hide the landing screen immediately
+          document.getElementById('screen-landing').classList.remove('active');
+          showScreen('screen-markets');
+          renderInterestTags();
+          loadMarkets();
+          return;
+        }
+      }
+    } catch(_) {}
+  }
+  // If no session or session not done, ensure landing is visible
+  showScreen('screen-landing');
+  const r2 = await fetch('/session/start', { method: 'POST' });
+  S.session = await r2.json();
+  localStorage.setItem('ebs_sid', S.session.session_id);
+}
+  // New user or expired session
+  const r2 = await fetch('/session/start', { method: 'POST' });
+  S.session = await r2.json();
+  localStorage.setItem('ebs_sid', S.session.session_id);
+  // Show landing (default screen)
+}
+
+async function saveProfile(profile) {
+  const r = await fetch('/session/' + S.session.session_id + '/profile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+  });
+  const data = await r.json();
+  S.session.profile = data.profile;
+  S.session.done    = true;
+}
+
+async function resetProfile() {
+  if (!confirm('Reset your profile and redo onboarding?')) return;
+  await fetch('/session/' + S.session.session_id + '/profile', { method: 'DELETE' });
+  S.session.done    = false;
+  S.session.profile = null;
+  restartOnboarding();
+}
+
+// ─── Screen management ────────────────────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+// ─── Landing ──────────────────────────────────────────────────────────────────
+async function loadLandingStats() {
+  try {
+    const d = await fetch('/api/stats').then(r => r.json());
+    document.getElementById('live-count').textContent = (d.open_markets || '—').toLocaleString?.() ?? d.open_markets;
+    document.getElementById('arb-count').textContent  = d.arb_count || '—';
+  } catch { document.getElementById('live-count').textContent = '10k+'; document.getElementById('arb-count').textContent = 'Live'; }
+}
+
+function startOnboarding() { 
+  // If session is already done, just go to markets
+  if (S.session && S.session.done) {
+    showScreen('screen-markets');
+    loadMarkets();
+  } else {
+    showScreen('screen-chat'); 
+    renderStep(0); 
+  }
+}
+
+// ─── Onboarding flow ──────────────────────────────────────────────────────────
+const FLOW = [
+  {
+    ai: "Hey! I'm going to find prediction market bets tailored just for you. First — what topics do you actually follow? Pick everything that applies 👇",
+    chips: ["⚽ Sports","🏀 NBA","🏈 NFL","⚾ MLB","🎮 Esports","₿ Crypto","📈 Stocks","🏛️ Politics","🤖 AI & Tech","🎬 Entertainment","🌍 World Events","🔬 Science"],
+    key:'interests', multi:true, placeholder:"Or type a topic...", step:"Step 1 of 3",
+  },
+  {
+    ai: s => `Got it — ${(s.interests||[]).slice(0,3).join(', ')} and more. How do you like your bets?`,
+    chips: ["🛡️ Safe only (high chance)","⚖️ Mix of both","🎯 Long shots (big upside)"],
+    key:'risk_profile', multi:false, placeholder:"Describe your style...", step:"Step 2 of 3",
+  },
+  {
+    ai: () => "Perfect. Anything specific right now you want bets on?",
+    chips: ["Just surprise me","Trump & US politics","Champions League","Bitcoin price","AI race","2026 elections"],
+    key:'specific', multi:false, placeholder:"Or just say 'surprise me'...", step:"Step 3 of 3",
+  },
+];
+
+function renderStep(idx) {
+  S.step = idx; S.selectedChips = [];
+  const step = FLOW[idx];
+  document.getElementById('step-indicator').textContent = step.step;
+  const msg = typeof step.ai === 'function' ? step.ai(S.session?.profile || {}) : step.ai;
+  showTyping(() => {
+    appendAI(msg);
+    if (step.chips) appendChips(step.chips, step.multi, step.key);
+    document.getElementById('chat-input').placeholder = step.placeholder || 'Type...';
+    document.getElementById('chat-input').focus();
+  });
+}
+
+function showTyping(cb) {
+  const body = document.getElementById('chat-body');
+  const el = document.createElement('div');
+  el.className = 'msg ai'; el.id = 'typing';
+  el.innerHTML = `<div class="avatar ai">E</div><div class="bubble" style="display:flex;gap:4px;align-items:center;padding:1rem 1.1rem"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>`;
+  body.appendChild(el); scrollChat();
+  setTimeout(() => { el.remove(); cb(); scrollChat(); }, 900);
+}
+
+function appendAI(text) {
+  const body = document.getElementById('chat-body');
+  const el = document.createElement('div');
+  el.className = 'msg ai';
+  el.innerHTML = `<div class="avatar ai">E</div><div class="bubble">${text}</div>`;
+  body.appendChild(el);
+}
+
+function appendUser(text) {
+  const body = document.getElementById('chat-body');
+  const el = document.createElement('div');
+  el.className = 'msg user';
+  el.innerHTML = `<div class="bubble">${text}</div><div class="avatar user-av">You</div>`;
+  body.appendChild(el); scrollChat();
+}
+
+function appendChips(options, multi, key) {
+  const body = document.getElementById('chat-body');
+  const row = document.createElement('div');
+  row.className = 'chips-row'; row.id = 'chips-row';
+  options.forEach(opt => {
+    const c = document.createElement('div');
+    c.className = 'chip'; c.textContent = opt;
+    c.onclick = () => selectChip(c, opt, multi, key);
+    row.appendChild(c);
+  });
+  if (multi) {
+    const ok = document.createElement('div');
+    ok.className = 'chip'; ok.textContent = '✓ Continue';
+    ok.style.cssText = 'background:rgba(0,230,118,.1);border-color:var(--accent);color:var(--accent)';
+    ok.onclick = () => { if (S.selectedChips.length) advance(key, [...S.selectedChips]); };
+    row.appendChild(ok);
+  }
+  body.appendChild(row);
+}
+
+function selectChip(chip, value, multi, key) {
+  if (!multi) {
+    document.getElementById('chips-row')?.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+    chip.classList.add('selected');
+    setTimeout(() => advance(key, [value]), 300);
+  } else {
+    chip.classList.toggle('selected');
+    S.selectedChips = chip.classList.contains('selected')
+      ? [...S.selectedChips, value]
+      : S.selectedChips.filter(v => v !== value);
+  }
+}
+
+function sendMessage() {
+  const input = document.getElementById('chat-input');
+  const val = input.value.trim(); if (!val) return;
+  input.value = '';
+  advance(FLOW[S.step].key, [val]);
+}
+
+// Build profile object from answers and persist it
+const _profile = {};
+async function advance(key, values) {
+  document.getElementById('chips-row')?.remove();
+  if (key === 'interests') {
+    _profile.interests = values.map(v => v.replace(/^[^\s]+\s/,'').trim());
+  } else {
+    _profile[key] = values[0];
+  }
+  appendUser(values.join(' · '));
+  const next = S.step + 1;
+  if (next < FLOW.length) { renderStep(next); }
+  else { await finishOnboarding(); }
+}
+
+async function finishOnboarding() {
+  await saveProfile(_profile);   // ← persists to MongoDB via POST /session/{sid}/profile
+  showTyping(() => {
+    appendAI("Perfect — scanning markets now 🔍");
+    scrollChat();
+    setTimeout(() => { showScreen('screen-markets'); renderInterestTags(); loadMarkets(); }, 1200);
+  });
+}
+
+function scrollChat() { const b = document.getElementById('chat-body'); b.scrollTop = b.scrollHeight; }
+
+// ─── Markets ──────────────────────────────────────────────────────────────────
+async function loadMarkets() {
+  document.getElementById('markets-list').innerHTML = '<div class="loading-state"><div class="spinner"></div><div class="loading-text">Scanning markets for your interests...</div></div>';
+  try {
+    const r    = await fetch('/api/markets', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ profile: S.session?.profile || _profile }) });
+    const data = await r.json();
+    S.allMarkets = data.markets || [];
+    renderMarkets(S.allMarkets);
+    if (data.arb_groups?.length) renderArbGroups(data.arb_groups);
+    renderFilters();
+  } catch { renderDemoData(); }
+}
+
+function renderInterestTags() {
+  const ct = document.getElementById('interest-tags'); ct.innerHTML = '';
+  const interests = S.session?.profile?.interests || _profile.interests || [];
+  interests.slice(0,4).forEach(i => {
+    const t = document.createElement('div'); t.className = 'interest-tag'; t.textContent = i; ct.appendChild(t);
+  });
+}
+
+function renderFilters() {
+  const cats = ['all', ...new Set(S.allMarkets.map(m => m.category).filter(Boolean))];
+  const row  = document.getElementById('filters-row'); row.innerHTML = '';
+  cats.forEach(cat => {
+    const c = document.createElement('div');
+    c.className = `filter-chip ${cat==='all'?'active':''}`;
+    c.textContent = cat === 'all' ? 'All' : cat.replace(/_/g,' ');
+    c.onclick = () => {
+      row.querySelectorAll('.filter-chip').forEach(x => x.classList.remove('active'));
+      c.classList.add('active'); S.activeFilter = cat;
+      renderMarkets(cat==='all' ? S.allMarkets : S.allMarkets.filter(m => m.category===cat));
+    };
+    row.appendChild(c);
+  });
+}
+
+function renderMarkets(markets) {
+  const list = document.getElementById('markets-list');
+  document.getElementById('market-count').textContent = `${markets.length} markets`;
+  if (!markets.length) { list.innerHTML = `<div class="loading-state"><div style="font-size:2rem;margin-bottom:1rem">🤔</div><div class="loading-text">No matching markets found.</div></div>`; return; }
+  list.innerHTML = '';
+  markets.forEach((m, i) => {
+    const card    = document.createElement('div');
+    const eClass  = (m.edge||0) > 0 ? 'positive' : 'negative';
+    const cClass  = m.signal_type==='arb' ? 'overpriced' : (m.edge||0)>0 ? 'underpriced' : 'value';
+    const tType   = m.signal_type==='arb' ? 'arb' : (m.edge||0)>0 ? 'edge' : 'value';
+    const tLabel  = m.signal_type==='arb' ? '⚡ ARB' : (m.edge||0)>0 ? '📈 EDGE' : '🎯 VALUE';
+    const eTxt    = m.edge != null ? `${m.edge>0?'+':''}${(m.edge*100).toFixed(1)}¢` : '—';
+    card.className = `market-card ${cClass}`;
+    card.innerHTML = `
+      <div class="card-top"><span class="card-tag ${tType}">${tLabel}</span><div class="card-question">${m.question}</div></div>
+      <div class="card-meta">
+        <div class="price-block"><span class="price-label">YES</span><span class="price-val yes">${(m.yes_price*100).toFixed(0)}¢</span></div>
+        <div class="price-block"><span class="price-label">NO</span><span class="price-val no">${((1-m.yes_price)*100).toFixed(0)}¢</span></div>
+        ${m.base_rate!=null?`<div class="price-block"><span class="price-label">Model</span><span class="price-val" style="color:var(--muted)">${(m.base_rate*100).toFixed(0)}%</span></div>`:''}
+        <div class="edge-badge ${eClass}">${eTxt} edge</div>
+      </div>
+      <div class="card-explain">${m.explanation||''}</div>
+      <div class="card-actions">
+        <button class="action-btn yes-btn" onclick="event.stopPropagation();window.open('https://polymarket.com/event/${m.slug||''}','_blank')">Bet YES</button>
+        <button class="action-btn no-btn"  onclick="event.stopPropagation();window.open('https://polymarket.com/event/${m.slug||''}','_blank')">Bet NO</button>
+        <button class="action-btn poly-btn" onclick="event.stopPropagation();window.open('https://polymarket.com/event/${m.slug||''}','_blank')">View on Polymarket ↗</button>
+      </div>`;
+    card.onclick = () => card.classList.toggle('expanded');
+    list.appendChild(card);
+  });
+}
+
+function renderArbGroups(groups) {
+  document.getElementById('arb-section').style.display = 'block';
+  document.getElementById('arb-section-count').textContent = `${groups.length} group${groups.length!==1?'s':''}`;
+  const list = document.getElementById('arb-list'); list.innerHTML = '';
+  groups.forEach(g => {
+    const el = document.createElement('div'); el.className = 'arb-group';
+    el.innerHTML = `<div class="arb-group-title">⚡ MUTUALLY EXCLUSIVE<span class="arb-sum">Sum: ${(g.total_yes*100).toFixed(1)}¢</span></div>
+      ${g.markets.map(m=>`<div class="arb-leg"><span class="arb-price">${(m.yes_price*100).toFixed(0)}¢</span><span class="arb-question">${m.question.substring(0,70)}${m.question.length>70?'…':''}</span></div>`).join('')}
+      <div style="margin-top:.8rem;font-size:.82rem;color:var(--muted)">${g.action}</div>`;
+    list.appendChild(el);
+  });
+}
+
+function renderDemoData() {
+  const demo = [
+    { question:"Will the Fed cut rates at the May 2026 meeting?", yes_price:.38, edge:-.12, signal_type:'value', category:'economics', base_rate:.25, slug:'fed-rate-cut-may-2026', explanation:"Base rate for this question type is 25% — priced at 38%, suggesting NO has edge." },
+    { question:"Will Bitcoin reach $120,000 before July 2026?",   yes_price:.29, edge:-.09, signal_type:'value', category:'crypto',    base_rate:.15, slug:'bitcoin-120k-july-2026', explanation:"Specific price targets resolve YES only ~15% historically. 29% looks overpriced." },
+    { question:"Will Mbappe score in the next Champions League?",  yes_price:.44, edge:.06,  signal_type:'edge',  category:'sports',    base_rate:.50, slug:'mbappe-ucl',           explanation:"Top UCL strikers score ~50% — slightly above current 44% market price." },
+  ];
+  S.allMarkets = demo; renderMarkets(demo); renderFilters();
+  document.getElementById('market-count').textContent = `${demo.length} markets (demo — start API)`;
+}
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+loadLandingStats();
+initSession();   // checks localStorage → skips landing+onboarding for returning users
+</script>
+</body>
+</html>
+"""
