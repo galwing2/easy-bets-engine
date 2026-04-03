@@ -9,7 +9,7 @@ load_dotenv()
 
 # ── External APIs ─────────────────────────────────────────────────────────────
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL:   str = "gemini-2.0-flash"          # free tier, no billing required
+GEMINI_MODEL:   str = "gemini-2.5-flash"          # free tier, no billing required
 GEMINI_URL:     str = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent"
