@@ -180,7 +180,7 @@ def _call_gemini_raw(prompt: str) -> dict:
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
-                    "maxOutputTokens": 1024,
+                    "maxOutputTokens": 4096,
                     "temperature":     0.1,
                     # Forces Gemini to output perfect JSON, preventing formatting cut-offs
                     "responseMimeType": "application/json", 
