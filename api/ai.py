@@ -179,11 +179,19 @@ def _call_gemini_raw(prompt: str) -> dict:
             headers={"Content-Type": "application/json"},
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
-                # deliberately NO "tools" key — avoids the spending cap
                 "generationConfig": {
                     "maxOutputTokens": 1024,
                     "temperature":     0.1,
+                    # Forces Gemini to output perfect JSON, preventing formatting cut-offs
+                    "responseMimeType": "application/json", 
                 },
+                # Disables default blocks so sports betting keywords don't abort the generation
+                "safetySettings": [
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"}
+                ]
             },
             timeout=30,
         )
