@@ -1,13 +1,21 @@
 """
-api/ai.py — Gemini 2.5 Flash analysis with googleSearch grounding.
+api/ai.py — Market analysis using Tavily (free web search) + Gemini (free tier).
+
+Flow:
+  1. Tavily searches the web for real-time data about the market question
+  2. Search results are injected into the Gemini prompt as plain text context
+  3. Gemini reasons over the data and returns a structured JSON verdict
+  4. Result is cached in MongoDB for 6 hours
+
+This approach requires NO billing on either service:
+  - Tavily free tier: 1,000 searches/month  → https://tavily.com
+  - Gemini free tier: 1,500 requests/day    → no googleSearch tool needed
 
 Public interface:
-    analyze(cache_key, question, yes_price) -> dict
-        Returns cached result if fresh, otherwise calls Gemini and caches.
-
-    call_gemini(question, yes_price) -> dict
-        Raw Gemini call — used by routes and debug endpoints.
+    analyze(cache_key, question, yes_price) -> (dict, from_cache: bool)
+    call_gemini(question, yes_price) -> dict   (used by debug endpoints)
 """
+
 import re
 import json
 import hashlib
@@ -15,11 +23,11 @@ from datetime import datetime, timezone, timedelta
 
 import requests
 
-from config import GEMINI_API_KEY, GEMINI_URL, ANALYSIS_CACHE_TTL_HOURS
+from config import GEMINI_API_KEY, GEMINI_URL, TAVILY_API_KEY, ANALYSIS_CACHE_TTL_HOURS
 from api.db import get_db
 
 
-# ── Cache helpers ─────────────────────────────────────────────────────────────
+# ── Cache ─────────────────────────────────────────────────────────────────────
 
 def _cache_get(cache_key: str) -> dict | None:
     doc = get_db()["market_analysis"].find_one({"cache_key": cache_key})
@@ -47,51 +55,123 @@ def _cache_set(cache_key: str, analysis: dict) -> None:
     )
 
 
-# ── Gemini call ───────────────────────────────────────────────────────────────
+# ── Step 1: Tavily web search ─────────────────────────────────────────────────
 
-PROMPT_TEMPLATE = """\
-You are an expert sports betting analyst with live web search access.
+def _tavily_search(question: str) -> str:
+    """
+    Search the web via Tavily and return a formatted context string.
+    Falls back to empty string if Tavily key is missing or call fails.
+    """
+    if not TAVILY_API_KEY:
+        return ""
 
-MARKET: "{question}"
-Current YES price: {yes_pct}%   |   Current NO price: {no_pct}%
+    query = question.strip().rstrip("?")
+
+    try:
+        resp = requests.post(
+            "https://api.tavily.com/search",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {TAVILY_API_KEY}",
+            },
+            json={
+                "query":               query,
+                "search_depth":        "advanced",
+                "max_results":         6,
+                "include_answer":      True,
+                "include_raw_content": False,
+            },
+            timeout=15,
+        )
+
+        if not resp.ok:
+            return ""
+
+        data    = resp.json()
+        results = data.get("results", [])
+        answer  = data.get("answer", "")
+
+        lines = []
+        if answer:
+            lines.append(f"WEB SUMMARY: {answer}\n")
+
+        for i, r in enumerate(results[:5], 1):
+            title   = r.get("title", "")
+            url     = r.get("url", "")
+            content = r.get("content", "").strip()[:400]
+            lines.append(f"[Source {i}] {title}\n{url}\n{content}\n")
+
+        return "\n".join(lines)
+
+    except Exception:
+        return ""
+
+
+# ── Step 2: Gemini reasoning ──────────────────────────────────────────────────
+
+PROMPT_WITH_DATA = """\
+You are an expert sports betting analyst. You have been given real-time web \
+search results about a prediction market question. Use this data to determine \
+whether the market is mispriced.
+
+MARKET QUESTION: "{question}"
+Current YES price: {yes_pct}%  |  Current NO price: {no_pct}%
+
+LIVE WEB SEARCH RESULTS:
+{web_context}
 
 TASK:
-1. Search the web for all relevant data: team/player current form, \
-rankings/ratings, injury news, head-to-head record, expert predictions, \
-sportsbook consensus odds.
-2. Determine the TRUE fair probability for YES resolving.
-3. Identify whether this market is mispriced vs the current Polymarket price.
+Based on the search results above, determine the true fair probability for \
+YES resolving. Identify any mispricing vs the current Polymarket price.
 
-RESPOND with ONLY a valid JSON object — no markdown fences, no preamble:
+RESPOND with ONLY a valid JSON object — no markdown fences, no extra text:
 {{
   "fair_value": <float 0.0-1.0>,
   "confidence": "<low|medium|high>",
   "verdict": "<BUY_YES|BUY_NO|FAIR|SKIP>",
-  "edge_pct": <signed float, e.g. +12.5 means YES is 12.5 cents cheap>,
-  "reasoning": "<2-3 sentences — direct, cite specific facts found>",
-  "key_facts": ["<fact with source>", "<fact>", "<fact>"],
+  "edge_pct": <signed float — positive means YES is cheap, e.g. +12.5>,
+  "reasoning": "<2-3 sentences citing specific facts from the search results>",
+  "key_facts": ["<fact>", "<fact>", "<fact>"],
   "sportsbook_implied": <float 0.0-1.0 or null if not found>
 }}
 
 Verdict rules:
 - BUY_YES if fair_value > yes_price + 0.05
 - BUY_NO  if fair_value < yes_price - 0.05
-- FAIR    if within 5 cents
-- SKIP    if insufficient data found
-- confidence = "high" only if you found 3+ solid independent data points
+- FAIR    if within 5 cents of current price
+- SKIP    if the search results contain insufficient relevant data
+- Set confidence = "high" only if 3+ independent data points support your verdict
+- Be specific: name teams, cite scores, rankings, odds from the sources above
+"""
+
+PROMPT_NO_DATA = """\
+You are an expert sports betting analyst. No live web data was available, \
+so use your training knowledge to analyse this market.
+
+MARKET QUESTION: "{question}"
+Current YES price: {yes_pct}%  |  Current NO price: {no_pct}%
+
+Based on your knowledge of sports statistics, typical outcomes, team/player \
+quality and historical base rates, give your best estimate of fair value.
+Note in your reasoning that this is based on training data, not live info.
+
+RESPOND with ONLY a valid JSON object — no markdown fences, no extra text:
+{{
+  "fair_value": <float 0.0-1.0>,
+  "confidence": "low",
+  "verdict": "<BUY_YES|BUY_NO|FAIR|SKIP>",
+  "edge_pct": <signed float>,
+  "reasoning": "<2-3 sentences>",
+  "key_facts": ["<fact>", "<fact>"],
+  "sportsbook_implied": null
+}}
 """
 
 
-def call_gemini(question: str, yes_price: float) -> dict:
-    """Fire a Gemini + googleSearch call. Returns a structured dict or {error: ...}."""
+def _call_gemini_raw(prompt: str) -> dict:
+    """Send a plain prompt to Gemini — no tools, no billing needed."""
     if not GEMINI_API_KEY:
         return {"error": "GEMINI_API_KEY not set in .env"}
-
-    prompt = PROMPT_TEMPLATE.format(
-        question=question,
-        yes_pct=round(yes_price * 100),
-        no_pct=round((1 - yes_price) * 100),
-    )
 
     try:
         resp = requests.post(
@@ -99,10 +179,13 @@ def call_gemini(question: str, yes_price: float) -> dict:
             headers={"Content-Type": "application/json"},
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
-                "tools": [{"googleSearch": {}}],
-                "generationConfig": {"maxOutputTokens": 4096, "temperature": 0.1},
+                # deliberately NO "tools" key — avoids the spending cap
+                "generationConfig": {
+                    "maxOutputTokens": 1024,
+                    "temperature":     0.1,
+                },
             },
-            timeout=45,
+            timeout=30,
         )
 
         if not resp.ok:
@@ -126,24 +209,22 @@ def call_gemini(question: str, yes_price: float) -> dict:
             finish = candidates[0].get("finishReason", "unknown")
             return {"error": f"Gemini returned empty text. finishReason={finish}"}
 
-        # Strip markdown fences
         raw = re.sub(r"^```[a-z]*\n?", "", raw.strip())
         raw = re.sub(r"\n?```$",        "", raw.strip())
 
-        # Parse JSON — try direct first, then extract from prose
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
             match = re.search(r"\{.*\}", raw, re.DOTALL)
             if not match:
-                return {"error": f"No JSON in Gemini response. Raw: {raw[:400]}"}
+                return {"error": f"No JSON in response. Raw: {raw[:400]}"}
             try:
                 parsed = json.loads(match.group())
             except Exception as e:
                 return {"error": f"JSON parse failed: {e}. Raw: {raw[:400]}"}
 
         return {
-            "fair_value":         float(parsed.get("fair_value", yes_price)),
+            "fair_value":         float(parsed.get("fair_value", 0.5)),
             "confidence":         str(parsed.get("confidence", "low")),
             "verdict":            str(parsed.get("verdict", "SKIP")),
             "edge_pct":           float(parsed.get("edge_pct", 0)),
@@ -153,17 +234,40 @@ def call_gemini(question: str, yes_price: float) -> dict:
         }
 
     except requests.exceptions.Timeout:
-        return {"error": "Gemini timed out (45s). Try again."}
+        return {"error": "Gemini timed out (30s). Try again."}
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}
 
 
-# ── Public entry point ────────────────────────────────────────────────────────
+# ── Public: call_gemini (also used by debug endpoint) ─────────────────────────
+
+def call_gemini(question: str, yes_price: float) -> dict:
+    """Full pipeline: Tavily search → Gemini reasoning."""
+    web_context = _tavily_search(question)
+
+    if web_context:
+        prompt = PROMPT_WITH_DATA.format(
+            question=question,
+            yes_pct=round(yes_price * 100),
+            no_pct=round((1 - yes_price) * 100),
+            web_context=web_context,
+        )
+    else:
+        prompt = PROMPT_NO_DATA.format(
+            question=question,
+            yes_pct=round(yes_price * 100),
+            no_pct=round((1 - yes_price) * 100),
+        )
+
+    return _call_gemini_raw(prompt)
+
+
+# ── Public: analyze (called by route) ────────────────────────────────────────
 
 def analyze(cache_key: str, question: str, yes_price: float) -> tuple[dict, bool]:
     """
     Returns (result_dict, from_cache).
-    Checks MongoDB first; calls Gemini on miss and caches the result.
+    Checks MongoDB cache first; on miss runs Tavily + Gemini and caches result.
     """
     if not cache_key:
         cache_key = hashlib.md5(question.encode()).hexdigest()

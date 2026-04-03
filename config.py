@@ -9,11 +9,15 @@ load_dotenv()
 
 # ── External APIs ─────────────────────────────────────────────────────────────
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL:   str = "gemini-2.0-flash"
+GEMINI_MODEL:   str = "gemini-2.0-flash"          # free tier, no billing required
 GEMINI_URL:     str = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent"
 )
+
+# Tavily: free web search (1,000 searches/month free, no billing)
+# Get your free key at https://tavily.com → Dashboard → API Keys
+TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
 
 POLYMARKET_GAMMA: str = (
     "https://gamma-api.polymarket.com/events"
