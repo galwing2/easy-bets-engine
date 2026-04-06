@@ -1,54 +1,9 @@
 // ─── State ────────────────────────────────────────────────────────────────────
 const S = {
-  session: null, step: 0, selectedChips: [],
   allMarkets: [], activeSport: 'all', activeEdge: 'all',
 };
-const _profile = {};
 
-// ─── Session ──────────────────────────────────────────────────────────────────
-async function initSession() {
-  const sid = localStorage.getItem('ebs_sid');
-  if (sid) {
-    try {
-      const r = await fetch('/session/' + sid);
-      if (r.ok) {
-        S.session = await r.json();
-        if (S.session.done && S.session.profile) {
-          showScreen('screen-markets'); renderInterestTags(); loadMarkets(); return;
-        }
-      }
-    } catch (_) {}
-  }
-  showScreen('screen-landing');
-  try {
-    const r2 = await fetch('/session/start', { method: 'POST' });
-    S.session = await r2.json();
-    localStorage.setItem('ebs_sid', S.session.session_id);
-  } catch (_) {}
-}
-
-async function saveProfile(profile) {
-  const r = await fetch('/session/' + S.session.session_id + '/profile', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(profile),
-  });
-  const data = await r.json();
-  S.session.profile = data.profile;
-  S.session.done    = true;
-}
-
-async function resetProfile() {
-  if (!confirm('Reset your profile and redo onboarding?')) return;
-  await fetch('/session/' + S.session.session_id + '/profile', { method: 'DELETE' });
-  S.session.done    = false;
-  S.session.profile = null;
-  S.activeSport     = 'all';
-  S.activeEdge      = 'all';
-  document.getElementById('chat-body').innerHTML = '';
-  showScreen('screen-chat');
-  renderStep(0);
-}
-
+// ─── Boot ─────────────────────────────────────────────────────────────────────
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
@@ -64,129 +19,10 @@ async function loadLandingStats() {
   }
 }
 
-function startOnboarding() {
-  if (S.session?.done && S.session?.profile) {
-    showScreen('screen-markets'); renderInterestTags(); loadMarkets();
-  } else {
-    showScreen('screen-chat'); renderStep(0);
-  }
+function startApp() {
+  showScreen('screen-markets');
+  loadMarkets();
 }
-
-// ─── Onboarding flow ──────────────────────────────────────────────────────────
-const FLOW = [
-  {
-    ai: "Hey! I'll find sports prediction market bets tailored for you. Which sports do you follow? Pick all that apply 👇",
-    chips: ["⚽ Soccer","🏀 NBA","🏈 NFL","⚾ MLB","🎾 Tennis","🏆 Champions League",
-            "🌍 World Cup","🥊 Boxing / MMA","⛳ Golf","🏒 NHL","🏎 F1 / Racing","🏉 Rugby / Cricket"],
-    key: 'interests', multi: true, placeholder: "Or type a sport...", step: "Step 1 of 3",
-  },
-  {
-    ai: s => `Nice — ${(s.interests || []).slice(0, 3).join(', ')}. How aggressive do you want the picks?`,
-    chips: ["🛡️ Favourites only (70%+ YES)", "⚖️ Mix of both", "🎯 Underdogs (big upside)"],
-    key: 'risk_profile', multi: false, placeholder: "Describe your style...", step: "Step 2 of 3",
-  },
-  {
-    ai: () => "Any specific leagues, teams, or events to focus on?",
-    chips: ["Just surprise me","Champions League","NBA Playoffs","Premier League",
-            "UFC","Copa América","March Madness"],
-    key: 'specific', multi: false, placeholder: "e.g. 'Real Madrid' or 'surprise me'...", step: "Step 3 of 3",
-  },
-];
-
-function renderStep(idx) {
-  S.step = idx; S.selectedChips = [];
-  const step = FLOW[idx];
-  document.getElementById('step-indicator').textContent = step.step;
-  const msg = typeof step.ai === 'function' ? step.ai(S.session?.profile || _profile) : step.ai;
-  showTyping(() => {
-    appendAI(msg);
-    if (step.chips) appendChips(step.chips, step.multi, step.key);
-    document.getElementById('chat-input').placeholder = step.placeholder || 'Type...';
-    document.getElementById('chat-input').focus();
-  });
-}
-
-function showTyping(cb) {
-  const body = document.getElementById('chat-body');
-  const el   = document.createElement('div');
-  el.className = 'msg ai'; el.id = 'typing';
-  el.innerHTML = `<div class="avatar ai">E</div><div class="bubble" style="display:flex;gap:4px;align-items:center;padding:1rem 1.1rem"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>`;
-  body.appendChild(el); scrollChat();
-  setTimeout(() => { el.remove(); cb(); scrollChat(); }, 900);
-}
-
-function appendAI(text) {
-  const body = document.getElementById('chat-body');
-  const el   = document.createElement('div'); el.className = 'msg ai';
-  el.innerHTML = `<div class="avatar ai">E</div><div class="bubble">${text}</div>`;
-  body.appendChild(el);
-}
-
-function appendUser(text) {
-  const body = document.getElementById('chat-body');
-  const el   = document.createElement('div'); el.className = 'msg user';
-  el.innerHTML = `<div class="bubble">${text}</div><div class="avatar user-av">You</div>`;
-  body.appendChild(el); scrollChat();
-}
-
-function appendChips(options, multi, key) {
-  const body = document.getElementById('chat-body');
-  const row  = document.createElement('div'); row.className = 'chips-row'; row.id = 'chips-row';
-  options.forEach(opt => {
-    const c = document.createElement('div'); c.className = 'chip'; c.textContent = opt;
-    c.onclick = () => selectChip(c, opt, multi, key); row.appendChild(c);
-  });
-  if (multi) {
-    const ok = document.createElement('div'); ok.className = 'chip'; ok.textContent = '✓ Continue';
-    ok.style.cssText = 'background:rgba(0,230,118,.1);border-color:var(--accent);color:var(--accent)';
-    ok.onclick = () => { if (S.selectedChips.length) advance(key, [...S.selectedChips]); };
-    row.appendChild(ok);
-  }
-  body.appendChild(row);
-}
-
-function selectChip(chip, value, multi, key) {
-  if (!multi) {
-    document.getElementById('chips-row')?.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
-    chip.classList.add('selected');
-    setTimeout(() => advance(key, [value]), 300);
-  } else {
-    chip.classList.toggle('selected');
-    S.selectedChips = chip.classList.contains('selected')
-      ? [...S.selectedChips, value]
-      : S.selectedChips.filter(v => v !== value);
-  }
-}
-
-function sendMessage() {
-  const input = document.getElementById('chat-input');
-  const val   = input.value.trim(); if (!val) return;
-  input.value = ''; advance(FLOW[S.step].key, [val]);
-}
-
-async function advance(key, values) {
-  document.getElementById('chips-row')?.remove();
-  if (key === 'interests') {
-    _profile.interests = values.map(v => v.replace(/^[^\s]+\s/, '').trim());
-  } else {
-    _profile[key] = values[0];
-  }
-  appendUser(values.join(' · '));
-  const next = S.step + 1;
-  if (next < FLOW.length) { renderStep(next); }
-  else { await finishOnboarding(); }
-}
-
-async function finishOnboarding() {
-  await saveProfile(_profile);
-  showTyping(() => {
-    appendAI("Perfect — scanning markets 🔍");
-    scrollChat();
-    setTimeout(() => { showScreen('screen-markets'); renderInterestTags(); loadMarkets(); }, 1200);
-  });
-}
-
-function scrollChat() { const b = document.getElementById('chat-body'); b.scrollTop = b.scrollHeight; }
 
 // ─── Markets ──────────────────────────────────────────────────────────────────
 async function loadMarkets() {
@@ -194,27 +30,19 @@ async function loadMarkets() {
     '<div class="loading-state"><div class="spinner"></div><div class="loading-text">Scanning sports markets...</div></div>';
 
   try {
-    const profile = S.session?.profile || _profile;
-    const r = await fetch('/api/markets', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ profile }),
+    const r    = await fetch('/api/markets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile: {} }),
     });
-    const data    = await r.json();
-    S.allMarkets  = data.markets || [];
+    const data = await r.json();
+    S.allMarkets = data.markets || [];
     renderSportFilters();
     applyFilters();
   } catch (e) {
-    console.error(e); renderDemoData();
+    console.error(e);
+    renderDemoData();
   }
-}
-
-function renderInterestTags() {
-  const ct        = document.getElementById('interest-tags'); ct.innerHTML = '';
-  const interests = S.session?.profile?.interests || _profile.interests || [];
-  interests.slice(0, 4).forEach(i => {
-    const t = document.createElement('div'); t.className = 'interest-tag'; t.textContent = i;
-    ct.appendChild(t);
-  });
 }
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
@@ -226,12 +54,12 @@ const SPORT_ICONS = {
 
 function renderSportFilters() {
   const cats = ['all', ...new Set(S.allMarkets.map(m => m.category).filter(Boolean).sort())];
-  const row  = document.getElementById('sport-filters'); row.innerHTML = '';
+  const row  = document.getElementById('sport-filters');
+  row.innerHTML = '';
   cats.forEach(cat => {
     const c = document.createElement('button');
     c.className   = `filter-chip ${cat === 'all' ? 'active' : ''}`;
     c.textContent = `${SPORT_ICONS[cat] || '🏆'} ${cat === 'all' ? 'All Sports' : cat}`;
-    c.dataset.sport = cat;
     c.onclick = () => setSportFilter(cat, c);
     row.appendChild(c);
   });
@@ -239,13 +67,18 @@ function renderSportFilters() {
 
 function setSportFilter(sport, btn) {
   document.querySelectorAll('#sport-filters .filter-chip').forEach(c => c.classList.remove('active'));
-  btn.classList.add('active'); S.activeSport = sport; applyFilters();
+  btn.classList.add('active');
+  S.activeSport = sport;
+  applyFilters();
 }
 
 function setEdgeFilter(edge, btn) {
-  document.querySelectorAll('.subfilter-chip').forEach(c => c.classList.remove('active-all','active-yes','active-no'));
+  document.querySelectorAll('.subfilter-chip').forEach(c =>
+    c.classList.remove('active-all', 'active-yes', 'active-no')
+  );
   btn.classList.add(edge === 'all' ? 'active-all' : edge === 'yes' ? 'active-yes' : 'active-no');
-  S.activeEdge = edge; applyFilters();
+  S.activeEdge = edge;
+  applyFilters();
 }
 
 function applyFilters() {
@@ -269,13 +102,12 @@ function renderMarkets(markets) {
 }
 
 function buildCard(m) {
-  const card     = document.createElement('div');
-  const eClass   = (m.edge || 0) > 0 ? 'positive' : 'negative';
-  const tType    = (m.edge || 0) > 0 ? 'edge' : 'value';
-  const tLabel   = (m.edge || 0) > 0 ? '📈 EDGE' : '🎯 VALUE';
-  const eTxt     = m.edge != null ? `${m.edge > 0 ? '+' : ''}${(m.edge * 100).toFixed(1)}¢` : '—';
+  const card   = document.createElement('div');
+  const eClass = (m.edge || 0) > 0 ? 'positive' : 'negative';
+  const tType  = (m.edge || 0) > 0 ? 'edge' : 'value';
+  const tLabel = (m.edge || 0) > 0 ? '📈 EDGE' : '🎯 VALUE';
+  const eTxt   = m.edge != null ? `${m.edge > 0 ? '+' : ''}${(m.edge * 100).toFixed(1)}¢` : '—';
 
-  // Store data as attributes — avoids injection issues with inline handlers
   card.className        = `market-card ${(m.edge || 0) > 0 ? 'underpriced' : 'value'}`;
   card.dataset.cacheKey = m.cache_key || '';
   card.dataset.question = m.question;
@@ -305,7 +137,6 @@ function buildCard(m) {
     </div>
     <div class="ai-panel" style="display:none;"></div>`;
 
-  // Attach click handler cleanly — no inline JS
   card.querySelector('.ai-btn').addEventListener('click', () => triggerAnalysis(card));
   return card;
 }
@@ -319,8 +150,8 @@ async function triggerAnalysis(card) {
   const yesPrice = parseFloat(card.dataset.yesPrice);
   const polyUrl  = card.dataset.polyUrl;
 
-  btn.textContent = '⏳ Researching...';
-  btn.disabled    = true;
+  btn.textContent     = '⏳ Researching...';
+  btn.disabled        = true;
   panel.style.display = 'block';
   panel.innerHTML = `
     <div class="ai-skeleton">
@@ -332,7 +163,8 @@ async function triggerAnalysis(card) {
 
   try {
     const r = await fetch('/api/analyze-market', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cache_key: cacheKey, question, yes_price: yesPrice }),
     });
 
@@ -373,16 +205,17 @@ function renderAIPanel(panel, res, yesPrice, polyUrl, fromCache) {
   const sbImp   = res.sportsbook_implied;
 
   const lvl  = conf === 'high' ? 3 : conf === 'medium' ? 2 : 1;
-  const dots = [1, 2, 3].map(i => `<div class="conf-dot ${i <= lvl ? 'on-' + conf : ''}"></div>`).join('');
+  const dots = [1, 2, 3].map(i =>
+    `<div class="conf-dot ${i <= lvl ? 'on-' + conf : ''}"></div>`
+  ).join('');
 
   const verdictMap   = { BUY_YES:'🟢 BUY YES', BUY_NO:'🔴 BUY NO', FAIR:'⚪ FAIR', SKIP:'⏭ SKIP' };
   const verdictLabel = verdictMap[verdict] || verdict;
   const edgeClass    = isPos ? 'pos' : isNeg ? 'neg' : 'neu';
   const edgeStr      = `${edgePct > 0 ? '+' : ''}${edgePct.toFixed(1)}¢`;
-
-  const barFill  = Math.round(fv * 100);
-  const tickLeft = Math.round(yesPrice * 100);
-  const barClass = fv >= yesPrice ? 'bull' : 'bear';
+  const barFill      = Math.round(fv * 100);
+  const tickLeft     = Math.round(yesPrice * 100);
+  const barClass     = fv >= yesPrice ? 'bull' : 'bear';
 
   const compareHTML = `
     <div class="compare-row">
@@ -394,7 +227,9 @@ function renderAIPanel(panel, res, yesPrice, polyUrl, fromCache) {
         <span class="compare-lbl">AI Fair Value</span>
         <span class="compare-val ai">${(fv * 100).toFixed(0)}¢</span>
       </div>
-      ${sbImp != null ? `<div class="compare-item"><span class="compare-lbl">Sportsbooks</span><span class="compare-val sb">${(sbImp * 100).toFixed(0)}¢</span></div>` : ''}
+      ${sbImp != null
+        ? `<div class="compare-item"><span class="compare-lbl">Sportsbooks</span><span class="compare-val sb">${(sbImp * 100).toFixed(0)}¢</span></div>`
+        : ''}
     </div>`;
 
   const factsHTML = (res.key_facts || [])
@@ -413,7 +248,6 @@ function renderAIPanel(panel, res, yesPrice, polyUrl, fromCache) {
         </div>
         ${fromCache ? '<span class="cache-badge">● cached</span>' : ''}
       </div>
-
       <div class="prob-section">
         <div class="prob-row-labels">
           <span>0%</span>
@@ -425,11 +259,9 @@ function renderAIPanel(panel, res, yesPrice, polyUrl, fromCache) {
           <div class="market-marker" style="left:${tickLeft}%"></div>
         </div>
       </div>
-
       ${compareHTML}
       <div class="ai-reasoning">${res.reasoning || ''}</div>
       ${factsHTML ? `<div class="key-facts">${factsHTML}</div>` : ''}
-
       <div class="card-actions">
         <button class="action-btn yes-btn"  onclick="window.open('${polyUrl}','_blank')">Bet YES ↗</button>
         <button class="action-btn no-btn"   onclick="window.open('${polyUrl}','_blank')">Bet NO ↗</button>
@@ -445,10 +277,11 @@ function renderDemoData() {
     { question:"Will the Lakers win their next game?",                      yes_price:.55, edge:-.08, category:'NBA',   poly_url:'https://polymarket.com', cache_key:'demo2' },
     { question:"Will Djokovic win the French Open 2026?",                   yes_price:.31, edge:.09, category:'Tennis', poly_url:'https://polymarket.com', cache_key:'demo3' },
   ];
-  S.allMarkets = demo; renderSportFilters(); applyFilters();
+  S.allMarkets = demo;
+  renderSportFilters();
+  applyFilters();
   document.getElementById('market-count').textContent = `${demo.length} markets (demo)`;
 }
 
-// ─── Boot ─────────────────────────────────────────────────────────────────────
+// ─── Init ──────────────────────────────────────────────────────────────────────
 loadLandingStats();
-initSession();
