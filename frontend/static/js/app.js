@@ -132,6 +132,9 @@ function buildCard(m) {
         <div class="edge-badge ${eClass}">${eTxt} edge</div>
       </div>
       <div class="card-actions" style="margin-top:.9rem">
+        <button class="action-btn yes-btn"  onclick="window.open('${m.poly_url || 'https://polymarket.com'}','_blank')">Bet YES ↗</button>
+        <button class="action-btn no-btn"   onclick="window.open('${m.poly_url || 'https://polymarket.com'}','_blank')">Bet NO ↗</button>
+        <button class="action-btn poly-btn" onclick="window.open('${m.poly_url || 'https://polymarket.com'}','_blank')">Polymarket ↗</button>
         <button class="action-btn ai-btn">🤖 Analyze Market</button>
       </div>
     </div>
@@ -262,11 +265,6 @@ function renderAIPanel(panel, res, yesPrice, polyUrl, fromCache) {
       ${compareHTML}
       <div class="ai-reasoning">${res.reasoning || ''}</div>
       ${factsHTML ? `<div class="key-facts">${factsHTML}</div>` : ''}
-      <div class="card-actions">
-        <button class="action-btn yes-btn"  onclick="window.open('${polyUrl}','_blank')">Bet YES ↗</button>
-        <button class="action-btn no-btn"   onclick="window.open('${polyUrl}','_blank')">Bet NO ↗</button>
-        <button class="action-btn poly-btn" onclick="window.open('${polyUrl}','_blank')">Polymarket ↗</button>
-      </div>
     </div>`;
 }
 
