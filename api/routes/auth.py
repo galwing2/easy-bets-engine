@@ -24,9 +24,7 @@ def send_gmail(to_email: str, subject: str, html_content: str):
         smtp.login(SENDER_EMAIL, GMAIL_APP_PASSWORD)
         smtp.send_message(msg)
 
-@router.post("/magic-link")
-def request_magic_link(body: MagicLinkRequest):
-    email = body.email.lower().strip()
+def generate_and_send_link(email: str):
     token = str(uuid.uuid4())
     expires = datetime.now(timezone.utc) + timedelta(minutes=15)
     
@@ -42,13 +40,27 @@ def request_magic_link(body: MagicLinkRequest):
     <p>Click the link below to log into your account. This link will expire in 15 minutes.</p>
     <p><a href='{magic_link}'><strong>Click here to login</strong></a></p>
     """
-    
     try:
         send_gmail(email, "Your EasyBets Login Link", html)
     except Exception as e:
         raise HTTPException(500, f"Failed to send email: {str(e)}")
+
+@router.post("/sign-up")
+def sign_up(body: MagicLinkRequest):
+    email = body.email.lower().strip()
+    generate_and_send_link(email)
+    return {"message": "Sign up link sent"}
+
+@router.post("/sign-in")
+def sign_in(body: MagicLinkRequest):
+    email = body.email.lower().strip()
+    user = get_db()["users"].find_one({"email": email})
+    
+    if not user:
+        raise HTTPException(404, "Email not found. Please Sign Up first.")
         
-    return {"message": "Magic link sent"}
+    generate_and_send_link(email)
+    return {"message": "Sign in link sent"}
 
 @router.post("/verify")
 def verify_token(body: VerifyRequest):

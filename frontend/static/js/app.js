@@ -39,27 +39,42 @@ window.onload = async () => {
     loadLandingStats();
 };
 
-async function requestLink() {
+async function handleAuth(type) {
     const email = document.getElementById('auth-email').value;
-    const btn = document.getElementById('auth-btn');
+    const msg = document.getElementById('auth-msg');
+    const inBtn = document.getElementById('signin-btn');
+    const upBtn = document.getElementById('signup-btn');
+    
     if (!email) return;
-    
-    btn.textContent = "Sending...";
-    btn.disabled = true;
-    document.getElementById('auth-msg').textContent = "";
-    
+
+    inBtn.disabled = true;
+    upBtn.disabled = true;
+    msg.style.color = "var(--accent)";
+    msg.textContent = "Sending...";
+
+    const endpoint = type === 'in' ? '/api/auth/sign-in' : '/api/auth/sign-up';
+
     try {
-        await fetch('/api/auth/magic-link', {
+        const res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email })
         });
-        document.getElementById('auth-msg').textContent = "Link sent! Check your inbox.";
+        
+        const data = await res.json();
+        
+        if (!res.ok) {
+            throw new Error(data.detail || "Server error");
+        }
+        
+        msg.style.color = "var(--accent)";
+        msg.textContent = "Magic link sent! Check your inbox.";
     } catch (e) {
-        document.getElementById('auth-msg').textContent = "Failed to send link.";
+        msg.style.color = "var(--danger)";
+        msg.textContent = e.message;
     } finally {
-        btn.textContent = "Send Magic Link";
-        btn.disabled = false;
+        inBtn.disabled = false;
+        upBtn.disabled = false;
     }
 }
 
@@ -87,8 +102,9 @@ async function loadLandingStats() {
 
 function startApp() {
   showScreen('screen-markets');
-  document.getElementById('user-display').textContent = S.userEmail || "Sign Out";
+  document.getElementById('user-display').textContent = S.userEmail || "";
   loadMarkets();
+  updateAlertCountBadge();
 }
 
 async function loadMarkets() {
@@ -105,7 +121,6 @@ async function loadMarkets() {
     applyFilters();
   } catch (e) {
     console.error(e);
-    renderDemoData();
   }
 }
 
@@ -154,7 +169,7 @@ function renderMarkets(markets) {
   const list = document.getElementById('markets-list');
   document.getElementById('market-count').textContent = `${markets.length} markets`;
   if (!markets.length) {
-    list.innerHTML = `<div class="no-results"><div class="no-results-icon">🔍</div><div class="no-results-text">No markets match your filters.</div></div>`;
+    list.innerHTML = `<div class="no-results"><div class="no-results-text">No markets match your filters.</div></div>`;
     return;
   }
   list.innerHTML = '';
@@ -213,19 +228,28 @@ function buildCard(m) {
   return card;
 }
 
+/* --- ALERT MANAGEMENT --- */
+
 function closeAlertModal() {
     document.getElementById('alert-modal').style.display = "none";
     currentAlertMarket = null;
 }
 
-async function saveAlert() {
-    if (!S.userEmail) {
-        document.getElementById('alert-error').textContent = "You must be logged in.";
-        return;
-    }
+async function updateAlertCountBadge() {
+    if (!S.userEmail) return;
+    try {
+        const res = await fetch(`/api/alerts/${S.userEmail}`);
+        const data = await res.json();
+        document.getElementById('alert-usage').textContent = data.alerts.length;
+    } catch (e) {}
+}
 
+async function saveAlert() {
     const side = document.getElementById('alert-side').value;
     const price = parseInt(document.getElementById('alert-price').value) / 100;
+    const errorEl = document.getElementById('alert-error');
+    
+    errorEl.textContent = "Saving...";
     
     try {
         const res = await fetch('/api/alerts/', {
@@ -242,17 +266,60 @@ async function saveAlert() {
         
         if (!res.ok) {
             const data = await res.json();
-            document.getElementById('alert-error').textContent = data.detail || "Error saving alert.";
+            errorEl.textContent = data.detail || "Error saving alert.";
             return;
         }
         
         closeAlertModal();
-        alert("Alert saved successfully!"); 
+        updateAlertCountBadge();
         
     } catch (e) {
-        document.getElementById('alert-error').textContent = "Network error.";
+        errorEl.textContent = "Network error.";
     }
 }
+
+async function openManageAlerts() {
+    document.getElementById('manage-alerts-modal').style.display = 'flex';
+    const list = document.getElementById('manage-alerts-list');
+    list.innerHTML = `<div class="loading-state"><div class="spinner"></div></div>`;
+
+    try {
+        const res = await fetch(`/api/alerts/${S.userEmail}`);
+        const data = await res.json();
+        document.getElementById('alert-usage').textContent = data.alerts.length;
+
+        if (data.alerts.length === 0) {
+            list.innerHTML = "<p style='color:var(--muted); text-align:center;'>You have no active alerts.</p>";
+            return;
+        }
+
+        list.innerHTML = data.alerts.map(a => `
+            <div style="background:var(--surface2); padding:1rem; border-radius:8px; display:flex; justify-content:space-between; align-items:center; border: 1px solid var(--border);">
+                <div style="padding-right: 1rem;">
+                    <div style="font-size:0.85rem; margin-bottom:0.4rem; font-weight:600;">${a.question}</div>
+                    <span class="card-tag edge" style="font-size:0.7rem;">Target: ${a.target_side} at ${a.target_price * 100}¢</span>
+                </div>
+                <button class="action-btn no-btn" onclick="deleteAlert('${a._id}')" style="flex-shrink:0;">Remove</button>
+            </div>
+        `).join('');
+    } catch (e) {
+        list.innerHTML = "<p style='color:var(--danger);'>Failed to load alerts.</p>";
+    }
+}
+
+async function deleteAlert(id) {
+    try {
+        const res = await fetch(`/api/alerts/${id}`, { method: 'DELETE' });
+        if(res.ok) {
+            openManageAlerts(); // Refresh the list UI
+            updateAlertCountBadge(); // Refresh the counter in header
+        }
+    } catch(e) {
+        alert("Failed to delete alert. Please try again.");
+    }
+}
+
+/* --- AI ANALYSIS --- */
 
 async function triggerAnalysis(card) {
   const btn = card.querySelector('.ai-btn');
@@ -333,13 +400,4 @@ function renderAIPanel(panel, res, yesPrice, polyUrl, fromCache) {
       <div class="ai-reasoning">${res.reasoning || ''}</div>
       ${factsHTML ? `<div class="key-facts">${factsHTML}</div>` : ''}
     </div>`;
-}
-
-function renderDemoData() {
-  const demo = [
-    { question:"Will Bayern Munich advance past Atalanta in CL quarters?", yes_price:.60, edge:.22, category:'Soccer', poly_url:'https://polymarket.com', cache_key:'demo1' }
-  ];
-  S.allMarkets = demo;
-  renderSportFilters();
-  applyFilters();
 }

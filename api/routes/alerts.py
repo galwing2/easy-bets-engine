@@ -1,3 +1,4 @@
+from bson.objectid import ObjectId
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from api.db import get_db
@@ -8,7 +9,10 @@ router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 @router.get("/{email}")
 def get_alerts(email: str):
-    alerts = list(get_db()["alerts"].find({"user_email": email, "fired": False}, {"_id": 0}))
+    # Fetch alerts and convert the MongoDB _id to a string
+    alerts = list(get_db()["alerts"].find({"user_email": email, "fired": False}))
+    for a in alerts:
+        a["_id"] = str(a["_id"]) 
     return {"alerts": alerts}
 
 @router.post("/")
@@ -31,3 +35,11 @@ def create_alert(body: AlertCreateRequest):
     
     db["alerts"].insert_one(alert)
     return {"message": "Alert created successfully"}
+
+@router.delete("/{alert_id}")
+def delete_alert(alert_id: str):
+    db = get_db()
+    result = db["alerts"].delete_one({"_id": ObjectId(alert_id)})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Alert not found")
+    return {"message": "Alert removed successfully"}

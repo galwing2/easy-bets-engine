@@ -20,18 +20,22 @@
     <div class="landing-content">
       <div class="logo-badge">⚡ EASYBETS</div>
       <h1 class="landing-title">Find Edge. <span>Set Alerts.</span></h1>
-      <p class="landing-sub">1. Enter email to sign in.<br>2. Find mispriced markets using AI.<br>3. Set alerts and let the system watch the odds for you.</p>
+      <p class="landing-sub">AI-powered sports market analysis.<br>Sign up to watch odds automatically.</p>
       
-      <div class="auth-box" style="display:flex; gap:0.5rem; justify-content:center; margin-bottom: 2rem;">
-        <input type="email" id="auth-email" placeholder="name@email.com" class="chat-input" style="max-width: 250px;">
-        <button class="cta-btn" onclick="requestLink()" id="auth-btn">Send Magic Link</button>
+      <!-- Split Auth Box -->
+      <div class="auth-box" style="display:flex; flex-direction:column; gap:1rem; align-items:center; margin-bottom: 2rem;">
+        <input type="email" id="auth-email" placeholder="name@email.com" class="chat-input" style="width: 100%; max-width: 280px;">
+        
+        <div style="display:flex; gap:0.8rem; width:100%; max-width: 280px;">
+          <button class="cta-btn" onclick="handleAuth('in')" id="signin-btn" style="flex:1; justify-content:center; background:var(--surface2); color:var(--text); border:1px solid var(--border);">Sign In</button>
+          <button class="cta-btn" onclick="handleAuth('up')" id="signup-btn" style="flex:1; justify-content:center;">Sign Up</button>
+        </div>
+        <div id="auth-msg" style="font-size: 0.9rem; font-weight: 600;"></div>
       </div>
-      <div id="auth-msg" style="font-size: 0.9rem; color: var(--accent);"></div>
 
       <div class="landing-stats">
         <div class="stat"><span class="stat-val" id="live-count">--</span><span class="stat-label">Live Markets</span></div>
         <div class="stat"><span class="stat-val">24/7</span><span class="stat-label">AI Analysis</span></div>
-        <div class="stat"><span class="stat-val">Real-time</span><span class="stat-label">Web Grounding</span></div>
       </div>
     </div>
   </div>
@@ -40,9 +44,17 @@
   <div id="screen-markets" class="screen">
     <div class="markets-header">
       <div class="markets-logo">⚡ EASY<span>BETS</span></div>
-      <div class="profile-pill" onclick="signOut()" title="Sign Out">
-        <div class="profile-dot"></div>
-        <span id="user-display">Sign Out</span>
+      
+      <!-- Top Navigation Bar -->
+      <div style="margin-left:auto; display:flex; align-items:center; gap:1rem;">
+        <button class="action-btn poly-btn" onclick="document.getElementById('about-modal').style.display='flex'">About</button>
+        <button class="action-btn ai-btn" onclick="openManageAlerts()">My Alerts (<span id="alert-usage">0</span>/5)</button>
+        
+        <div class="profile-pill" style="cursor:default;">
+          <div class="profile-dot"></div>
+          <span id="user-display"></span>
+          <button onclick="signOut()" style="background:none; border:none; color:var(--danger); font-family:var(--mono); font-size:0.75rem; cursor:pointer; margin-left:0.5rem;">[Sign Out]</button>
+        </div>
       </div>
     </div>
     
@@ -55,7 +67,6 @@
       <div class="filter-panel">
         <div class="filter-panel-title">Sport</div>
         <div class="filter-row" id="sport-filters"></div>
-        
         <div class="subfilter-row">
           <span class="subfilter-label">Edge Signal:</span>
           <button class="subfilter-chip active-all" onclick="setEdgeFilter('all', this)">All</button>
@@ -68,22 +79,20 @@
     </div>
   </div>
 
-  <!-- Alert Modal -->
+  <!-- Create Alert Modal -->
   <div id="alert-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; align-items:center; justify-content:center;">
     <div style="background:var(--surface); border:1px solid var(--border); padding:2rem; border-radius:12px; max-width:400px; width:100%; margin: 1rem;">
         <h3 style="margin-bottom:1rem;">Set Price Alert</h3>
         <p id="alert-q" style="font-size:0.9rem; color:var(--text); margin-bottom:1.5rem; line-height: 1.4;"></p>
         
-        <label style="font-size:0.8rem; color:var(--muted); margin-bottom:0.3rem; display:block;">Target Outcome</label>
+        <label style="font-size:0.8rem; color:var(--muted); display:block; margin-bottom:0.3rem;">Target Outcome</label>
         <select id="alert-side" class="chat-input" style="width:100%; margin-bottom:1rem;">
             <option value="YES">YES</option>
             <option value="NO">NO</option>
         </select>
         
-        <label style="font-size:0.8rem; color:var(--muted); margin-bottom:0.3rem; display:block;">Target Price (¢)</label>
-        <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:1.5rem;">
-            <input type="number" id="alert-price" class="chat-input" style="width:100%;" min="1" max="99" value="50">
-        </div>
+        <label style="font-size:0.8rem; color:var(--muted); display:block; margin-bottom:0.3rem;">Target Price (¢)</label>
+        <input type="number" id="alert-price" class="chat-input" style="width:100%; margin-bottom:1.5rem;" min="1" max="99" value="50">
         
         <div id="alert-error" style="color:var(--danger); font-size:0.85rem; margin-bottom:1rem; font-weight: 600;"></div>
         
@@ -91,6 +100,37 @@
             <button class="cta-btn" onclick="saveAlert()" style="flex:1; justify-content:center; padding: 0.7rem;">Save</button>
             <button class="action-btn poly-btn" onclick="closeAlertModal()" style="flex:1; padding: 0.7rem;">Cancel</button>
         </div>
+    </div>
+  </div>
+
+  <!-- Manage Alerts Hub Modal -->
+  <div id="manage-alerts-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:var(--surface); border:1px solid var(--border); padding:2rem; border-radius:12px; max-width:500px; width:100%; margin: 1rem; max-height:80vh; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+            <h3>My Active Alerts</h3>
+            <button onclick="document.getElementById('manage-alerts-modal').style.display='none'" style="background:none; border:none; color:var(--muted); font-size:1.5rem; cursor:pointer;">&times;</button>
+        </div>
+        <div id="manage-alerts-list" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:0.8rem;">
+            <!-- Alerts injected here -->
+        </div>
+    </div>
+  </div>
+
+  <!-- About Modal -->
+  <div id="about-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:var(--surface); border:1px solid var(--border); padding:2rem; border-radius:12px; max-width:450px; width:100%; margin: 1rem; line-height:1.6;">
+        <h3 style="margin-bottom:1rem;">How EasyBets Works</h3>
+        <p style="font-size:0.9rem; color:var(--text); margin-bottom:1rem;">EasyBets continuously monitors the Polymarket orderbook and compares it against an AI-driven Fair Value model to find mathematically profitable edges.</p>
+        
+        <h4 style="margin-bottom:0.5rem; color:var(--accent);">Alert Limits & Rules</h4>
+        <ul style="font-size:0.85rem; color:var(--muted); margin-left:1.5rem; margin-bottom:1.5rem;">
+            <li style="margin-bottom:0.3rem;">Users are limited to a maximum of <strong>5 active alerts</strong> at a time.</li>
+            <li style="margin-bottom:0.3rem;">Alerts trigger automatically when the live Polymarket price reaches your target odds.</li>
+            <li style="margin-bottom:0.3rem;">Once an alert triggers, it is deleted automatically, freeing up your quota.</li>
+            <li>You can manually delete old alerts in the "My Alerts" tab.</li>
+        </ul>
+        
+        <button class="cta-btn" onclick="document.getElementById('about-modal').style.display='none'" style="width:100%; justify-content:center; padding:0.8rem;">Got It</button>
     </div>
   </div>
 
