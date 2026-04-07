@@ -1,22 +1,27 @@
-"""
-api/models.py — Pydantic schemas for request bodies and shared types.
-"""
-from typing import Optional, List
 from pydantic import BaseModel
-
+from typing import Optional
 
 class Profile(BaseModel):
-    interests:    List[str]
-    risk_profile: Optional[str] = "mix"
-    specific:     Optional[str] = ""
-    name:         Optional[str] = ""
-
-
-class AnalyzeRequest(BaseModel):
-    cache_key: Optional[str] = ""
-    question:  str
-    yes_price: float
-
+    pass
 
 class MarketRequest(BaseModel):
-    profile:     Optional[dict] = {}
+    profile: Optional[dict] = {}
+
+class AnalyzeRequest(BaseModel):
+    cache_key: str
+    question: str
+    yes_price: float
+
+class MagicLinkRequest(BaseModel):
+    email: str
+
+class VerifyRequest(BaseModel):
+    email: str
+    token: str
+
+class AlertCreateRequest(BaseModel):
+    user_email: str
+    market_slug: str
+    question: str
+    target_price: float
+    target_side: str

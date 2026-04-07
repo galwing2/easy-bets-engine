@@ -1,64 +1,99 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EasyBets — Find Your Edge</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/main.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EasyBets</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
-<!-- ── LANDING ──────────────────────────────────────────────────────────── -->
-<div id="screen-landing" class="screen active">
-  <div class="grid-bg"></div>
-  <div class="glow-orb green"></div>
-  <div class="glow-orb blue"></div>
-  <div class="landing-content">
-    <div class="logo-badge">SPORTS MARKETS · AI-POWERED</div>
-    <h1 class="landing-title">Find your<br><span>easy bets.</span></h1>
-    <p class="landing-sub">We scan Polymarket sports markets in real time, use AI + live web search to detect mispriced outcomes, and show you exactly where the edge is.</p>
-    <button class="cta-btn" onclick="startApp()">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-      Find my edge
-    </button>
-    <div class="landing-stats">
-      <div class="stat"><span class="stat-val" id="live-count">—</span><span class="stat-label">Sports markets</span></div>
-      <div class="stat"><span class="stat-val">Free</span><span class="stat-label">Always</span></div>
-    </div>
-  </div>
-</div>
-
-<!-- ── MARKETS ───────────────────────────────────────────────────────────── -->
-<div id="screen-markets" class="screen" style="flex-direction:column">
-  <div class="markets-header">
-    <div class="markets-logo">Easy<span>Bets</span></div>
-  </div>
-  <div class="markets-body">
-    <div class="section-header">
-      <div class="section-title">Sports Edge Bets</div>
-      <div class="section-count" id="market-count">Loading...</div>
-    </div>
-    <div class="filter-panel">
-      <div class="filter-panel-title">Filter by sport</div>
-      <div class="filter-row" id="sport-filters"></div>
-      <div class="subfilter-row">
-        <span class="subfilter-label">Edge direction:</span>
-        <button class="subfilter-chip active-all" onclick="setEdgeFilter('all',this)">⚡ All bets</button>
-        <button class="subfilter-chip"            onclick="setEdgeFilter('yes',this)">📈 YES edge</button>
-        <button class="subfilter-chip"            onclick="setEdgeFilter('no',this)">📉 NO edge</button>
+  <!-- Landing Screen -->
+  <div id="screen-landing" class="screen active">
+    <div class="grid-bg"></div>
+    <div class="glow-orb green"></div>
+    <div class="glow-orb blue"></div>
+    
+    <div class="landing-content">
+      <div class="logo-badge">⚡ EASYBETS</div>
+      <h1 class="landing-title">Find Edge. <span>Set Alerts.</span></h1>
+      <p class="landing-sub">1. Enter email to sign in.<br>2. Find mispriced markets using AI.<br>3. Set alerts and let the system watch the odds for you.</p>
+      
+      <div class="auth-box" style="display:flex; gap:0.5rem; justify-content:center; margin-bottom: 2rem;">
+        <input type="email" id="auth-email" placeholder="name@email.com" class="chat-input" style="max-width: 250px;">
+        <button class="cta-btn" onclick="requestLink()" id="auth-btn">Send Magic Link</button>
       </div>
-    </div>
-    <div id="markets-list">
-      <div class="loading-state">
-        <div class="spinner"></div>
-        <div class="loading-text">Scanning sports markets...</div>
+      <div id="auth-msg" style="font-size: 0.9rem; color: var(--accent);"></div>
+
+      <div class="landing-stats">
+        <div class="stat"><span class="stat-val" id="live-count">--</span><span class="stat-label">Live Markets</span></div>
+        <div class="stat"><span class="stat-val">24/7</span><span class="stat-label">AI Analysis</span></div>
+        <div class="stat"><span class="stat-val">Real-time</span><span class="stat-label">Web Grounding</span></div>
       </div>
     </div>
   </div>
-</div>
 
-<script src="/static/js/app.js"></script>
+  <!-- Markets Screen -->
+  <div id="screen-markets" class="screen">
+    <div class="markets-header">
+      <div class="markets-logo">⚡ EASY<span>BETS</span></div>
+      <div class="profile-pill" onclick="signOut()" title="Sign Out">
+        <div class="profile-dot"></div>
+        <span id="user-display">Sign Out</span>
+      </div>
+    </div>
+    
+    <div class="markets-body">
+      <div class="section-header">
+        <h2 class="section-title">Sports Markets</h2>
+        <span class="section-count" id="market-count">--</span>
+      </div>
+      
+      <div class="filter-panel">
+        <div class="filter-panel-title">Sport</div>
+        <div class="filter-row" id="sport-filters"></div>
+        
+        <div class="subfilter-row">
+          <span class="subfilter-label">Edge Signal:</span>
+          <button class="subfilter-chip active-all" onclick="setEdgeFilter('all', this)">All</button>
+          <button class="subfilter-chip" onclick="setEdgeFilter('yes', this)">Bullish (YES)</button>
+          <button class="subfilter-chip" onclick="setEdgeFilter('no', this)">Bearish (NO)</button>
+        </div>
+      </div>
+      
+      <div id="markets-list"></div>
+    </div>
+  </div>
+
+  <!-- Alert Modal -->
+  <div id="alert-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:var(--surface); border:1px solid var(--border); padding:2rem; border-radius:12px; max-width:400px; width:100%; margin: 1rem;">
+        <h3 style="margin-bottom:1rem;">Set Price Alert</h3>
+        <p id="alert-q" style="font-size:0.9rem; color:var(--text); margin-bottom:1.5rem; line-height: 1.4;"></p>
+        
+        <label style="font-size:0.8rem; color:var(--muted); margin-bottom:0.3rem; display:block;">Target Outcome</label>
+        <select id="alert-side" class="chat-input" style="width:100%; margin-bottom:1rem;">
+            <option value="YES">YES</option>
+            <option value="NO">NO</option>
+        </select>
+        
+        <label style="font-size:0.8rem; color:var(--muted); margin-bottom:0.3rem; display:block;">Target Price (¢)</label>
+        <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:1.5rem;">
+            <input type="number" id="alert-price" class="chat-input" style="width:100%;" min="1" max="99" value="50">
+        </div>
+        
+        <div id="alert-error" style="color:var(--danger); font-size:0.85rem; margin-bottom:1rem; font-weight: 600;"></div>
+        
+        <div style="display:flex; gap:0.8rem;">
+            <button class="cta-btn" onclick="saveAlert()" style="flex:1; justify-content:center; padding: 0.7rem;">Save</button>
+            <button class="action-btn poly-btn" onclick="closeAlertModal()" style="flex:1; padding: 0.7rem;">Cancel</button>
+        </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
 </body>
 </html>

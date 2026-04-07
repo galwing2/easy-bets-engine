@@ -1,9 +1,76 @@
-// ─── State ────────────────────────────────────────────────────────────────────
 const S = {
   allMarkets: [], activeSport: 'all', activeEdge: 'all',
+  userEmail: localStorage.getItem('eb_email') || null,
+  sessionId: localStorage.getItem('eb_session') || null
 };
 
-// ─── Boot ─────────────────────────────────────────────────────────────────────
+let currentAlertMarket = null;
+
+window.onload = async () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    const email = urlParams.get('email');
+
+    if (token && email) {
+        try {
+            const res = await fetch('/api/auth/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, token })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                localStorage.setItem('eb_session', data.session_id);
+                localStorage.setItem('eb_email', data.email);
+                S.sessionId = data.session_id;
+                S.userEmail = data.email;
+                window.history.replaceState({}, document.title, "/"); 
+            }
+        } catch (e) {
+            console.error("Verification failed", e);
+        }
+    }
+
+    if (S.sessionId) {
+        startApp();
+    } else {
+        showScreen('screen-landing');
+    }
+    loadLandingStats();
+};
+
+async function requestLink() {
+    const email = document.getElementById('auth-email').value;
+    const btn = document.getElementById('auth-btn');
+    if (!email) return;
+    
+    btn.textContent = "Sending...";
+    btn.disabled = true;
+    document.getElementById('auth-msg').textContent = "";
+    
+    try {
+        await fetch('/api/auth/magic-link', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        });
+        document.getElementById('auth-msg').textContent = "Link sent! Check your inbox.";
+    } catch (e) {
+        document.getElementById('auth-msg').textContent = "Failed to send link.";
+    } finally {
+        btn.textContent = "Send Magic Link";
+        btn.disabled = false;
+    }
+}
+
+function signOut() {
+    localStorage.removeItem('eb_session');
+    localStorage.removeItem('eb_email');
+    S.sessionId = null;
+    S.userEmail = null;
+    showScreen('screen-landing');
+}
+
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
@@ -12,8 +79,7 @@ function showScreen(id) {
 async function loadLandingStats() {
   try {
     const d = await fetch('/api/stats').then(r => r.json());
-    document.getElementById('live-count').textContent =
-      typeof d.open_markets === 'number' ? d.open_markets.toLocaleString() : d.open_markets;
+    document.getElementById('live-count').textContent = typeof d.open_markets === 'number' ? d.open_markets.toLocaleString() : d.open_markets;
   } catch {
     document.getElementById('live-count').textContent = '500+';
   }
@@ -21,16 +87,14 @@ async function loadLandingStats() {
 
 function startApp() {
   showScreen('screen-markets');
+  document.getElementById('user-display').textContent = S.userEmail || "Sign Out";
   loadMarkets();
 }
 
-// ─── Markets ──────────────────────────────────────────────────────────────────
 async function loadMarkets() {
-  document.getElementById('markets-list').innerHTML =
-    '<div class="loading-state"><div class="spinner"></div><div class="loading-text">Scanning sports markets...</div></div>';
-
+  document.getElementById('markets-list').innerHTML = '<div class="loading-state"><div class="spinner"></div><div class="loading-text">Scanning sports markets...</div></div>';
   try {
-    const r    = await fetch('/api/markets', {
+    const r = await fetch('/api/markets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ profile: {} }),
@@ -45,7 +109,6 @@ async function loadMarkets() {
   }
 }
 
-// ─── Filters ──────────────────────────────────────────────────────────────────
 const SPORT_ICONS = {
   'all':'⚡','NFL':'🏈','NBA':'🏀','MLB':'⚾','NHL':'🏒','Soccer':'⚽',
   'Tennis':'🎾','UFC / MMA':'🥊','Golf':'⛳','Racing':'🏎',
@@ -73,9 +136,7 @@ function setSportFilter(sport, btn) {
 }
 
 function setEdgeFilter(edge, btn) {
-  document.querySelectorAll('.subfilter-chip').forEach(c =>
-    c.classList.remove('active-all', 'active-yes', 'active-no')
-  );
+  document.querySelectorAll('.subfilter-chip').forEach(c => c.classList.remove('active-all', 'active-yes', 'active-no'));
   btn.classList.add(edge === 'all' ? 'active-all' : edge === 'yes' ? 'active-yes' : 'active-no');
   S.activeEdge = edge;
   applyFilters();
@@ -89,12 +150,11 @@ function applyFilters() {
   renderMarkets(m);
 }
 
-// ─── Cards ────────────────────────────────────────────────────────────────────
 function renderMarkets(markets) {
   const list = document.getElementById('markets-list');
   document.getElementById('market-count').textContent = `${markets.length} markets`;
   if (!markets.length) {
-    list.innerHTML = `<div class="no-results"><div class="no-results-icon">🔍</div><div class="no-results-text">No markets match your filters.<br>Try adjusting the sport or edge direction.</div></div>`;
+    list.innerHTML = `<div class="no-results"><div class="no-results-icon">🔍</div><div class="no-results-text">No markets match your filters.</div></div>`;
     return;
   }
   list.innerHTML = '';
@@ -102,13 +162,13 @@ function renderMarkets(markets) {
 }
 
 function buildCard(m) {
-  const card   = document.createElement('div');
+  const card = document.createElement('div');
   const eClass = (m.edge || 0) > 0 ? 'positive' : 'negative';
   const tType  = (m.edge || 0) > 0 ? 'edge' : 'value';
   const tLabel = (m.edge || 0) > 0 ? '📈 EDGE' : '🎯 VALUE';
   const eTxt   = m.edge != null ? `${m.edge > 0 ? '+' : ''}${(m.edge * 100).toFixed(1)}¢` : '—';
 
-  card.className        = `market-card ${(m.edge || 0) > 0 ? 'underpriced' : 'value'}`;
+  card.className = `market-card ${(m.edge || 0) > 0 ? 'underpriced' : 'value'}`;
   card.dataset.cacheKey = m.cache_key || '';
   card.dataset.question = m.question;
   card.dataset.yesPrice = m.yes_price;
@@ -132,37 +192,80 @@ function buildCard(m) {
         <div class="edge-badge ${eClass}">${eTxt} edge</div>
       </div>
       <div class="card-actions" style="margin-top:.9rem">
-        <button class="action-btn yes-btn"  onclick="window.open('${m.poly_url || 'https://polymarket.com'}','_blank')">Bet YES ↗</button>
-        <button class="action-btn no-btn"   onclick="window.open('${m.poly_url || 'https://polymarket.com'}','_blank')">Bet NO ↗</button>
+        <button class="action-btn yes-btn" onclick="window.open('${m.poly_url || 'https://polymarket.com'}','_blank')">Bet YES ↗</button>
+        <button class="action-btn no-btn" onclick="window.open('${m.poly_url || 'https://polymarket.com'}','_blank')">Bet NO ↗</button>
         <button class="action-btn poly-btn" onclick="window.open('${m.poly_url || 'https://polymarket.com'}','_blank')">Polymarket ↗</button>
+        <button class="action-btn poly-btn alert-btn">🔔 Alert</button>
         <button class="action-btn ai-btn">🤖 Analyze Market</button>
       </div>
     </div>
     <div class="ai-panel" style="display:none;"></div>`;
 
   card.querySelector('.ai-btn').addEventListener('click', () => triggerAnalysis(card));
+  
+  card.querySelector('.alert-btn').addEventListener('click', () => {
+    currentAlertMarket = m;
+    document.getElementById('alert-q').textContent = m.question;
+    document.getElementById('alert-error').textContent = "";
+    document.getElementById('alert-modal').style.display = "flex";
+  });
+
   return card;
 }
 
-// ─── AI analysis ──────────────────────────────────────────────────────────────
+function closeAlertModal() {
+    document.getElementById('alert-modal').style.display = "none";
+    currentAlertMarket = null;
+}
+
+async function saveAlert() {
+    if (!S.userEmail) {
+        document.getElementById('alert-error').textContent = "You must be logged in.";
+        return;
+    }
+
+    const side = document.getElementById('alert-side').value;
+    const price = parseInt(document.getElementById('alert-price').value) / 100;
+    
+    try {
+        const res = await fetch('/api/alerts/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user_email: S.userEmail,
+                market_slug: currentAlertMarket.market_slug,
+                question: currentAlertMarket.question,
+                target_price: price,
+                target_side: side
+            })
+        });
+        
+        if (!res.ok) {
+            const data = await res.json();
+            document.getElementById('alert-error').textContent = data.detail || "Error saving alert.";
+            return;
+        }
+        
+        closeAlertModal();
+        alert("Alert saved successfully!"); 
+        
+    } catch (e) {
+        document.getElementById('alert-error').textContent = "Network error.";
+    }
+}
+
 async function triggerAnalysis(card) {
-  const btn      = card.querySelector('.ai-btn');
-  const panel    = card.querySelector('.ai-panel');
+  const btn = card.querySelector('.ai-btn');
+  const panel = card.querySelector('.ai-panel');
   const cacheKey = card.dataset.cacheKey;
   const question = card.dataset.question;
   const yesPrice = parseFloat(card.dataset.yesPrice);
-  const polyUrl  = card.dataset.polyUrl;
+  const polyUrl = card.dataset.polyUrl;
 
-  btn.textContent     = '⏳ Researching...';
-  btn.disabled        = true;
+  btn.textContent = '⏳ Researching...';
+  btn.disabled = true;
   panel.style.display = 'block';
-  panel.innerHTML = `
-    <div class="ai-skeleton">
-      <div class="skel-header"><div class="skel-badge"></div><div class="skel-badge" style="width:60px"></div></div>
-      <div class="skel-line m"></div>
-      <div class="skel-line l"></div>
-      <div class="skel-line s"></div>
-    </div>`;
+  panel.innerHTML = `<div class="ai-skeleton"><div class="skel-header"><div class="skel-badge"></div><div class="skel-badge" style="width:60px"></div></div><div class="skel-line m"></div><div class="skel-line l"></div><div class="skel-line s"></div></div>`;
 
   try {
     const r = await fetch('/api/analyze-market', {
@@ -170,28 +273,22 @@ async function triggerAnalysis(card) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cache_key: cacheKey, question, yes_price: yesPrice }),
     });
-
     let data;
-    try { data = await r.json(); }
-    catch (_) {
-      panel.innerHTML = `<div class="ai-error">⚠ Server returned non-JSON (HTTP ${r.status}). Check uvicorn logs.</div>`;
+    try { data = await r.json(); } catch (_) {
+      panel.innerHTML = `<div class="ai-error">⚠ Server returned non-JSON.</div>`;
       btn.textContent = '🤖 Analyze Market'; btn.disabled = false; return;
     }
-
     if (!r.ok) {
       panel.innerHTML = `<div class="ai-error">⚠ HTTP ${r.status}: ${data?.detail || JSON.stringify(data)}</div>`;
       btn.textContent = '🤖 Analyze Market'; btn.disabled = false; return;
     }
-
     const res = data.result || {};
     if (res.error) {
-      panel.innerHTML = `<div class="ai-error">⚠ ${res.error}<br><small style="opacity:.6">Visit <code>/api/debug</code> to diagnose.</small></div>`;
+      panel.innerHTML = `<div class="ai-error">⚠ ${res.error}</div>`;
       btn.textContent = '🤖 Analyze Market'; btn.disabled = false; return;
     }
-
     btn.textContent = '✅ Analyzed';
     renderAIPanel(panel, res, yesPrice, polyUrl, data.from_cache);
-
   } catch (e) {
     panel.innerHTML = `<div class="ai-error">⚠ Network error: ${e.message}</div>`;
     btn.textContent = '🤖 Analyze Market'; btn.disabled = false;
@@ -199,68 +296,38 @@ async function triggerAnalysis(card) {
 }
 
 function renderAIPanel(panel, res, yesPrice, polyUrl, fromCache) {
-  const fv      = res.fair_value ?? yesPrice;
-  const conf    = (res.confidence || 'low').toLowerCase();
+  const fv = res.fair_value ?? yesPrice;
+  const conf = (res.confidence || 'low').toLowerCase();
   const verdict = res.verdict || 'SKIP';
   const edgePct = res.edge_pct ?? ((fv - yesPrice) * 100);
-  const isPos   = edgePct > 0.5;
-  const isNeg   = edgePct < -0.5;
-  const sbImp   = res.sportsbook_implied;
+  const sbImp = res.sportsbook_implied;
+  const lvl = conf === 'high' ? 3 : conf === 'medium' ? 2 : 1;
+  const dots = [1, 2, 3].map(i => `<div class="conf-dot ${i <= lvl ? 'on-' + conf : ''}"></div>`).join('');
+  const verdictMap = { BUY_YES:'🟢 BUY YES', BUY_NO:'🔴 BUY NO', FAIR:'⚪ FAIR', SKIP:'⏭ SKIP' };
+  const edgeClass = edgePct > 0.5 ? 'pos' : edgePct < -0.5 ? 'neg' : 'neu';
+  const edgeStr = `${edgePct > 0 ? '+' : ''}${edgePct.toFixed(1)}¢`;
+  const barFill = Math.round(fv * 100);
+  const tickLeft = Math.round(yesPrice * 100);
+  const barClass = fv >= yesPrice ? 'bull' : 'bear';
 
-  const lvl  = conf === 'high' ? 3 : conf === 'medium' ? 2 : 1;
-  const dots = [1, 2, 3].map(i =>
-    `<div class="conf-dot ${i <= lvl ? 'on-' + conf : ''}"></div>`
-  ).join('');
-
-  const verdictMap   = { BUY_YES:'🟢 BUY YES', BUY_NO:'🔴 BUY NO', FAIR:'⚪ FAIR', SKIP:'⏭ SKIP' };
-  const verdictLabel = verdictMap[verdict] || verdict;
-  const edgeClass    = isPos ? 'pos' : isNeg ? 'neg' : 'neu';
-  const edgeStr      = `${edgePct > 0 ? '+' : ''}${edgePct.toFixed(1)}¢`;
-  const barFill      = Math.round(fv * 100);
-  const tickLeft     = Math.round(yesPrice * 100);
-  const barClass     = fv >= yesPrice ? 'bull' : 'bear';
-
-  const compareHTML = `
-    <div class="compare-row">
-      <div class="compare-item">
-        <span class="compare-lbl">Market (YES)</span>
-        <span class="compare-val market">${(yesPrice * 100).toFixed(0)}¢</span>
-      </div>
-      <div class="compare-item">
-        <span class="compare-lbl">AI Fair Value</span>
-        <span class="compare-val ai">${(fv * 100).toFixed(0)}¢</span>
-      </div>
-      ${sbImp != null
-        ? `<div class="compare-item"><span class="compare-lbl">Sportsbooks</span><span class="compare-val sb">${(sbImp * 100).toFixed(0)}¢</span></div>`
-        : ''}
+  const compareHTML = `<div class="compare-row">
+      <div class="compare-item"><span class="compare-lbl">Market (YES)</span><span class="compare-val market">${(yesPrice * 100).toFixed(0)}¢</span></div>
+      <div class="compare-item"><span class="compare-lbl">AI Fair Value</span><span class="compare-val ai">${(fv * 100).toFixed(0)}¢</span></div>
+      ${sbImp != null ? `<div class="compare-item"><span class="compare-lbl">Sportsbooks</span><span class="compare-val sb">${(sbImp * 100).toFixed(0)}¢</span></div>` : ''}
     </div>`;
+  const factsHTML = (res.key_facts || []).map(f => `<div class="fact-item"><span class="fact-dot">→</span>${f}</div>`).join('');
 
-  const factsHTML = (res.key_facts || [])
-    .map(f => `<div class="fact-item"><span class="fact-dot">→</span>${f}</div>`)
-    .join('');
-
-  panel.innerHTML = `
-    <div class="ai-loaded">
+  panel.innerHTML = `<div class="ai-loaded">
       <div class="ai-header">
         <span class="ai-label">AI Analysis</span>
-        <span class="verdict-pill verdict-${verdict}">${verdictLabel}</span>
+        <span class="verdict-pill verdict-${verdict}">${verdictMap[verdict] || verdict}</span>
         <span class="edge-chip ${edgeClass}">${edgeStr} edge</span>
-        <div class="conf-wrap">
-          <span class="ai-label">Confidence</span>
-          <div class="conf-dots">${dots}</div>
-        </div>
+        <div class="conf-wrap"><span class="ai-label">Confidence</span><div class="conf-dots">${dots}</div></div>
         ${fromCache ? '<span class="cache-badge">● cached</span>' : ''}
       </div>
       <div class="prob-section">
-        <div class="prob-row-labels">
-          <span>0%</span>
-          <span>AI fair value — ${(fv * 100).toFixed(0)}% YES</span>
-          <span>100%</span>
-        </div>
-        <div class="prob-track">
-          <div class="prob-fill ${barClass}" style="width:${barFill}%"></div>
-          <div class="market-marker" style="left:${tickLeft}%"></div>
-        </div>
+        <div class="prob-row-labels"><span>0%</span><span>AI fair value — ${(fv * 100).toFixed(0)}% YES</span><span>100%</span></div>
+        <div class="prob-track"><div class="prob-fill ${barClass}" style="width:${barFill}%"></div><div class="market-marker" style="left:${tickLeft}%"></div></div>
       </div>
       ${compareHTML}
       <div class="ai-reasoning">${res.reasoning || ''}</div>
@@ -268,18 +335,11 @@ function renderAIPanel(panel, res, yesPrice, polyUrl, fromCache) {
     </div>`;
 }
 
-// ─── Demo fallback ─────────────────────────────────────────────────────────────
 function renderDemoData() {
   const demo = [
-    { question:"Will Bayern Munich advance past Atalanta in CL quarters?", yes_price:.60, edge:.22, category:'Soccer', poly_url:'https://polymarket.com', cache_key:'demo1' },
-    { question:"Will the Lakers win their next game?",                      yes_price:.55, edge:-.08, category:'NBA',   poly_url:'https://polymarket.com', cache_key:'demo2' },
-    { question:"Will Djokovic win the French Open 2026?",                   yes_price:.31, edge:.09, category:'Tennis', poly_url:'https://polymarket.com', cache_key:'demo3' },
+    { question:"Will Bayern Munich advance past Atalanta in CL quarters?", yes_price:.60, edge:.22, category:'Soccer', poly_url:'https://polymarket.com', cache_key:'demo1' }
   ];
   S.allMarkets = demo;
   renderSportFilters();
   applyFilters();
-  document.getElementById('market-count').textContent = `${demo.length} markets (demo)`;
 }
-
-// ─── Init ──────────────────────────────────────────────────────────────────────
-loadLandingStats();

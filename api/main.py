@@ -1,9 +1,3 @@
-"""
-api/main.py — FastAPI entrypoint.
-Wires together routers and serves the frontend as static files.
-
-Run: uvicorn api.main:app --reload
-"""
 import os
 import joblib
 from pathlib import Path
@@ -14,9 +8,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 
 from config import ALLOWED_ORIGINS, MODEL_PATH
-from api.routes import sessions, markets, analysis
+from api.routes import sessions, markets, analysis, auth, alerts
 
-# ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="EasyBets API", version="2.0.0")
 
 app.add_middleware(
@@ -26,7 +19,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── ML model startup ──────────────────────────────────────────────────────────
 @app.on_event("startup")
 def load_model():
     if os.path.exists(MODEL_PATH):
@@ -36,16 +28,16 @@ def load_model():
     else:
         print(f"⚠️  No model found at {MODEL_PATH} — ML scoring disabled")
 
-# ── Routers ───────────────────────────────────────────────────────────────────
+# Routers
 app.include_router(sessions.router)
 app.include_router(markets.router)
 app.include_router(analysis.router)
+app.include_router(auth.router)
+app.include_router(alerts.router)
 
-# ── Static files (CSS, JS) ────────────────────────────────────────────────────
 FRONTEND = Path(__file__).parent.parent / "frontend"
 app.mount("/static", StaticFiles(directory=str(FRONTEND / "static")), name="static")
 
-# ── Serve index.html for all non-API routes ───────────────────────────────────
 INDEX = (FRONTEND / "templates" / "index.html").read_text()
 
 @app.get("/", response_class=HTMLResponse)
