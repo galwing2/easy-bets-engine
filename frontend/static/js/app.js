@@ -67,7 +67,7 @@ async function handleAuth(type) {
         if (!res.ok) throw new Error(data.detail || "Server error");
         
         msg.style.color = "var(--accent)";
-        msg.textContent = "Magic link sent! Check your inbox.";
+        msg.textContent = "Authorization link sent! Check your inbox.";
     } catch (e) {
         msg.style.color = "var(--danger)";
         msg.textContent = e.message;
@@ -199,6 +199,8 @@ function buildCard(m) {
   const tLabel = (m.edge || 0) > 0 ? '📈 EDGE' : '🎯 VALUE';
   const eTxt   = m.edge != null ? `${m.edge > 0 ? '+' : ''}${(m.edge * 100).toFixed(1)}¢` : '—';
 
+  // ASSIGN AN ID based on the market slug so we can scroll to it
+  card.id = m.market_slug ? `market-${m.market_slug}` : '';
   card.className = `market-card ${(m.edge || 0) > 0 ? 'underpriced' : 'value'}`;
   card.dataset.cacheKey = m.cache_key || '';
   card.dataset.question = m.question;
@@ -316,7 +318,11 @@ async function openManageAlerts() {
         list.innerHTML = data.alerts.map(a => `
             <div style="background:var(--surface2); padding:1rem; border-radius:8px; display:flex; justify-content:space-between; align-items:center; border: 1px solid var(--border);">
                 <div style="padding-right: 1rem;">
-                    <div style="font-size:0.85rem; margin-bottom:0.4rem; font-weight:600;">${a.question}</div>
+                    <div style="font-size:0.85rem; margin-bottom:0.4rem; font-weight:600;">
+                        <a href="javascript:void(0)" onclick="scrollToMarket('${a.market_slug}')" style="color:var(--text); text-decoration:none; border-bottom:1px dashed var(--muted); transition:color 0.2s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text)'" title="View Market">
+                            ${a.question}
+                        </a>
+                    </div>
                     <span class="card-tag edge" style="font-size:0.7rem;">Target: ${a.target_side} at ${a.target_price * 100}¢</span>
                 </div>
                 <button class="action-btn no-btn" onclick="deleteAlert('${a._id}')" style="flex-shrink:0;">Remove</button>
@@ -337,6 +343,33 @@ async function deleteAlert(id) {
     } catch(e) {
         alert("Failed to delete alert.");
     }
+}
+
+function scrollToMarket(slug) {
+    // 1. Close the modal
+    document.getElementById('manage-alerts-modal').style.display = 'none';
+
+    // 2. Reset the filters to "All" to ensure the target card isn't currently hidden
+    const allSportBtn = document.querySelector('#sport-filters .filter-chip');
+    if (allSportBtn) setSportFilter('all', allSportBtn);
+    
+    const allEdgeBtn = document.querySelector('.subfilter-chip.active-all') || document.querySelector('.subfilter-chip');
+    if (allEdgeBtn) setEdgeFilter('all', allEdgeBtn);
+
+    // 3. Give the DOM a millisecond to apply the filters, then scroll
+    setTimeout(() => {
+        const targetCard = document.getElementById(`market-${slug}`);
+        if (targetCard) {
+            targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            
+            // Briefly highlight the card to draw the user's eye
+            targetCard.style.transition = 'box-shadow 0.3s ease-in-out';
+            targetCard.style.boxShadow = '0 0 0 3px var(--accent)';
+            setTimeout(() => { targetCard.style.boxShadow = ''; }, 2000);
+        } else {
+            alert("This market is no longer active on the main page.");
+        }
+    }, 50);
 }
 
 /* --- AI ANALYSIS --- */
