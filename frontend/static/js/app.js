@@ -1,37 +1,35 @@
 const S = {
   allMarkets: [], activeSport: 'all', activeEdge: 'all',
   userEmail: localStorage.getItem('eb_email') || null,
-  sessionId: localStorage.getItem('eb_session') || null
+  sessionId: localStorage.getItem('eb_session') || null,
+  isGuest: localStorage.getItem('eb_guest') === 'true'
 };
 
 let currentAlertMarket = null;
 
 window.onload = async () => {
+    // Intercept redirect parameters from FastAPI
     const urlParams = new URLSearchParams(window.location.search);
-    const token = urlParams.get('token');
+    const sid = urlParams.get('session_id');
     const email = urlParams.get('email');
+    const error = urlParams.get('error');
 
-    if (token && email) {
-        try {
-            const res = await fetch('/api/auth/verify', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, token })
-            });
-            if (res.ok) {
-                const data = await res.json();
-                localStorage.setItem('eb_session', data.session_id);
-                localStorage.setItem('eb_email', data.email);
-                S.sessionId = data.session_id;
-                S.userEmail = data.email;
-                window.history.replaceState({}, document.title, "/"); 
-            }
-        } catch (e) {
-            console.error("Verification failed", e);
-        }
+    if (sid && email) {
+        localStorage.setItem('eb_session', sid);
+        localStorage.setItem('eb_email', email);
+        localStorage.removeItem('eb_guest');
+        S.sessionId = sid;
+        S.userEmail = email;
+        S.isGuest = false;
+        // Strip the tokens from the URL immediately so it looks clean
+        window.history.replaceState({}, document.title, "/"); 
+    } else if (error) {
+        alert(error === 'expired_token' ? "Link expired. Please request a new one." : "Invalid login link.");
+        window.history.replaceState({}, document.title, "/"); 
     }
 
-    if (S.sessionId) {
+    // Auto-Routing: Remember Me & Guest Mode
+    if (S.sessionId || S.isGuest) {
         startApp();
     } else {
         showScreen('screen-landing');
@@ -40,12 +38,17 @@ window.onload = async () => {
 };
 
 async function handleAuth(type) {
-    const email = document.getElementById('auth-email').value;
+    const emailInput = document.getElementById('auth-email');
     const msg = document.getElementById('auth-msg');
     const inBtn = document.getElementById('signin-btn');
     const upBtn = document.getElementById('signup-btn');
     
-    if (!email) return;
+    const email = emailInput.value.trim();
+    if (!email) {
+        msg.style.color = "var(--danger)";
+        msg.textContent = "Please enter an email address.";
+        return;
+    }
 
     inBtn.disabled = true;
     upBtn.disabled = true;
@@ -60,12 +63,8 @@ async function handleAuth(type) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email })
         });
-        
         const data = await res.json();
-        
-        if (!res.ok) {
-            throw new Error(data.detail || "Server error");
-        }
+        if (!res.ok) throw new Error(data.detail || "Server error");
         
         msg.style.color = "var(--accent)";
         msg.textContent = "Magic link sent! Check your inbox.";
@@ -78,11 +77,20 @@ async function handleAuth(type) {
     }
 }
 
-function signOut() {
+function enterAsGuest() {
+    localStorage.setItem('eb_guest', 'true');
+    S.isGuest = true;
+    startApp();
+}
+
+function toggleAuth() {
+    // If they are a guest clicking "Sign In", or a User clicking "Sign Out"
     localStorage.removeItem('eb_session');
     localStorage.removeItem('eb_email');
+    localStorage.removeItem('eb_guest');
     S.sessionId = null;
     S.userEmail = null;
+    S.isGuest = false;
     showScreen('screen-landing');
 }
 
@@ -102,9 +110,19 @@ async function loadLandingStats() {
 
 function startApp() {
   showScreen('screen-markets');
-  document.getElementById('user-display').textContent = S.userEmail || "";
+  
+  if (S.isGuest) {
+      document.getElementById('user-display').textContent = "Guest";
+      document.getElementById('auth-action-btn').textContent = "[Sign In]";
+      document.getElementById('header-alerts-btn').style.display = 'none'; // Hide alerts hub
+  } else {
+      document.getElementById('user-display').textContent = S.userEmail;
+      document.getElementById('auth-action-btn').textContent = "[Sign Out]";
+      document.getElementById('header-alerts-btn').style.display = 'block';
+      updateAlertCountBadge();
+  }
+  
   loadMarkets();
-  updateAlertCountBadge();
 }
 
 async function loadMarkets() {
@@ -119,9 +137,7 @@ async function loadMarkets() {
     S.allMarkets = data.markets || [];
     renderSportFilters();
     applyFilters();
-  } catch (e) {
-    console.error(e);
-  }
+  } catch (e) {}
 }
 
 const SPORT_ICONS = {
@@ -219,6 +235,10 @@ function buildCard(m) {
   card.querySelector('.ai-btn').addEventListener('click', () => triggerAnalysis(card));
   
   card.querySelector('.alert-btn').addEventListener('click', () => {
+    if (S.isGuest) {
+        alert("You must sign in to save alerts!");
+        return;
+    }
     currentAlertMarket = m;
     document.getElementById('alert-q').textContent = m.question;
     document.getElementById('alert-error').textContent = "";
@@ -311,11 +331,11 @@ async function deleteAlert(id) {
     try {
         const res = await fetch(`/api/alerts/${id}`, { method: 'DELETE' });
         if(res.ok) {
-            openManageAlerts(); // Refresh the list UI
-            updateAlertCountBadge(); // Refresh the counter in header
+            openManageAlerts(); 
+            updateAlertCountBadge(); 
         }
     } catch(e) {
-        alert("Failed to delete alert. Please try again.");
+        alert("Failed to delete alert.");
     }
 }
 

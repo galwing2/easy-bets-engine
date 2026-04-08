@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/main.css">
+  <link rel="stylesheet" href="/static/main.css">
 </head>
 <body>
 
@@ -22,7 +22,6 @@
       <h1 class="landing-title">Find Edge. <span>Set Alerts.</span></h1>
       <p class="landing-sub">AI-powered sports market analysis.<br>Sign up to watch odds automatically.</p>
       
-      <!-- Split Auth Box -->
       <div class="auth-box" style="display:flex; flex-direction:column; gap:1rem; align-items:center; margin-bottom: 2rem;">
         <input type="email" id="auth-email" placeholder="name@email.com" class="chat-input" style="width: 100%; max-width: 280px;">
         
@@ -31,6 +30,9 @@
           <button class="cta-btn" onclick="handleAuth('up')" id="signup-btn" style="flex:1; justify-content:center;">Sign Up</button>
         </div>
         <div id="auth-msg" style="font-size: 0.9rem; font-weight: 600;"></div>
+        
+        <!-- Guest Button -->
+        <button class="action-btn poly-btn" onclick="enterAsGuest()" style="margin-top: 0.5rem; font-size:0.85rem; border:none;">Continue as Guest &rarr;</button>
       </div>
 
       <div class="landing-stats">
@@ -45,15 +47,16 @@
     <div class="markets-header">
       <div class="markets-logo">⚡ EASY<span>BETS</span></div>
       
-      <!-- Top Navigation Bar -->
       <div style="margin-left:auto; display:flex; align-items:center; gap:1rem;">
         <button class="action-btn poly-btn" onclick="document.getElementById('about-modal').style.display='flex'">About</button>
-        <button class="action-btn ai-btn" onclick="openManageAlerts()">My Alerts (<span id="alert-usage">0</span>/5)</button>
+        
+        <!-- Alerts Hub Button (Hidden for Guests) -->
+        <button id="header-alerts-btn" class="action-btn ai-btn" onclick="openManageAlerts()">My Alerts (<span id="alert-usage">0</span>/5)</button>
         
         <div class="profile-pill" style="cursor:default;">
           <div class="profile-dot"></div>
           <span id="user-display"></span>
-          <button onclick="signOut()" style="background:none; border:none; color:var(--danger); font-family:var(--mono); font-size:0.75rem; cursor:pointer; margin-left:0.5rem;">[Sign Out]</button>
+          <button id="auth-action-btn" onclick="toggleAuth()" style="background:none; border:none; color:var(--danger); font-family:var(--mono); font-size:0.75rem; cursor:pointer; margin-left:0.5rem;">[Sign Out]</button>
         </div>
       </div>
     </div>
@@ -110,9 +113,7 @@
             <h3>My Active Alerts</h3>
             <button onclick="document.getElementById('manage-alerts-modal').style.display='none'" style="background:none; border:none; color:var(--muted); font-size:1.5rem; cursor:pointer;">&times;</button>
         </div>
-        <div id="manage-alerts-list" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:0.8rem;">
-            <!-- Alerts injected here -->
-        </div>
+        <div id="manage-alerts-list" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:0.8rem;"></div>
     </div>
   </div>
 
@@ -120,20 +121,17 @@
   <div id="about-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; align-items:center; justify-content:center;">
     <div style="background:var(--surface); border:1px solid var(--border); padding:2rem; border-radius:12px; max-width:450px; width:100%; margin: 1rem; line-height:1.6;">
         <h3 style="margin-bottom:1rem;">How EasyBets Works</h3>
-        <p style="font-size:0.9rem; color:var(--text); margin-bottom:1rem;">EasyBets continuously monitors the Polymarket orderbook and compares it against an AI-driven Fair Value model to find mathematically profitable edges.</p>
-        
+        <p style="font-size:0.9rem; color:var(--text); margin-bottom:1rem;">EasyBets monitors the Polymarket orderbook and compares it against an AI-driven Fair Value model to find mathematically profitable edges.</p>
         <h4 style="margin-bottom:0.5rem; color:var(--accent);">Alert Limits & Rules</h4>
         <ul style="font-size:0.85rem; color:var(--muted); margin-left:1.5rem; margin-bottom:1.5rem;">
             <li style="margin-bottom:0.3rem;">Users are limited to a maximum of <strong>5 active alerts</strong> at a time.</li>
-            <li style="margin-bottom:0.3rem;">Alerts trigger automatically when the live Polymarket price reaches your target odds.</li>
-            <li style="margin-bottom:0.3rem;">Once an alert triggers, it is deleted automatically, freeing up your quota.</li>
-            <li>You can manually delete old alerts in the "My Alerts" tab.</li>
+            <li style="margin-bottom:0.3rem;">Alerts trigger automatically when the live price reaches your target odds.</li>
+            <li>Once an alert triggers, it is deleted automatically.</li>
         </ul>
-        
         <button class="cta-btn" onclick="document.getElementById('about-modal').style.display='none'" style="width:100%; justify-content:center; padding:0.8rem;">Got It</button>
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=2"></script>
+  <script src="/static/js/app.js"></script>
 </body>
 </html>
