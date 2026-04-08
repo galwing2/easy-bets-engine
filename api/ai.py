@@ -1,23 +1,22 @@
 """
-api/ai.py — Market analysis using Tavily (free web search) + Gemini (free tier).
+api/ai.py — Market analysis using multi-agent AI debate + Tavily web search.
 
-Flow:
-  1. Tavily searches the web for real-time data about the market question
-  2. Search results are injected into the Gemini prompt as plain text context
-  3. Gemini reasons over the data and returns a structured JSON verdict
-  4. Result is cached in MongoDB for 6 hours
-
-This approach requires NO billing on either service:
-  - Tavily free tier: 1,000 searches/month  → https://tavily.com
-  - Gemini free tier: 1,500 requests/day    → no googleSearch tool needed
+Multi-Agent Flow (Feature 2):
+  1. Tavily searches the web for real-time data about the market question.
+  2. THREE Gemini calls run in parallel via asyncio:
+       • The Bull  — finds every statistical reason YES will happen.
+       • The Bear  — finds every statistical reason NO will happen.
+       • The Judge — reads Bull + Bear outputs and determines fair value.
+  3. Result is cached in MongoDB for 6 hours.
 
 Public interface:
     analyze(cache_key, question, yes_price) -> (dict, from_cache: bool)
-    call_gemini(question, yes_price) -> dict   (used by debug endpoints)
+    call_gemini(question, yes_price)         -> dict
 """
 
 import re
 import json
+import asyncio
 import hashlib
 from datetime import datetime, timezone, timedelta
 
@@ -107,12 +106,97 @@ def _tavily_search(question: str) -> str:
         return ""
 
 
-# ── Step 2: Gemini reasoning ──────────────────────────────────────────────────
+# ── Step 2: Multi-Agent Prompts ───────────────────────────────────────────────
 
-PROMPT_WITH_DATA = """\
-You are an expert sports betting analyst. You have been given real-time web \
-search results about a prediction market question. Use this data to determine \
-whether the market is mispriced.
+BULL_PROMPT = """\
+You are THE BULL — a sports betting analyst whose only job is to build the \
+strongest possible case for YES resolving.
+
+MARKET QUESTION: "{question}"
+Current YES price: {yes_pct}%
+
+LIVE WEB SEARCH RESULTS:
+{web_context}
+
+TASK: List every statistical, situational, and momentum-based reason why YES \
+is likely to happen. Be specific — cite teams, scores, injury reports, odds \
+from the sources. Do NOT hedge or mention reasons for NO.
+
+Respond with ONLY a JSON object — no markdown fences:
+{{
+  "bull_case": "<3-5 sentences making the strongest YES argument>",
+  "bull_facts": ["<specific fact>", "<specific fact>", "<specific fact>"],
+  "bull_implied_prob": <float 0.0-1.0, your estimate of true YES probability>
+}}
+"""
+
+BEAR_PROMPT = """\
+You are THE BEAR — a sports betting analyst whose only job is to build the \
+strongest possible case for NO resolving.
+
+MARKET QUESTION: "{question}"
+Current YES price: {yes_pct}%
+
+LIVE WEB SEARCH RESULTS:
+{web_context}
+
+TASK: List every statistical, situational, and momentum-based reason why NO \
+is likely to happen. Be specific — cite teams, scores, injury reports, odds \
+from the sources. Do NOT hedge or mention reasons for YES.
+
+Respond with ONLY a JSON object — no markdown fences:
+{{
+  "bear_case": "<3-5 sentences making the strongest NO argument>",
+  "bear_facts": ["<specific fact>", "<specific fact>", "<specific fact>"],
+  "bear_implied_prob": <float 0.0-1.0, your estimate of true YES probability>
+}}
+"""
+
+JUDGE_PROMPT = """\
+You are THE JUDGE — a senior hedge-fund quant who weighs both sides of a \
+prediction market debate and determines the true fair value.
+
+MARKET QUESTION: "{question}"
+Current Polymarket YES price: {yes_pct}%  |  NO price: {no_pct}%
+
+THE BULL SAYS:
+{bull_case}
+Bull's key facts: {bull_facts}
+Bull's implied YES probability: {bull_prob}%
+
+THE BEAR SAYS:
+{bear_case}
+Bear's key facts: {bear_facts}
+Bear's implied YES probability: {bear_prob}%
+
+TASK: Weigh the bull and bear arguments critically. Determine the true fair \
+value for YES. Identify which side has stronger evidence and why.
+
+Verdict rules:
+- BUY_YES if fair_value > yes_price + 0.05
+- BUY_NO  if fair_value < yes_price - 0.05
+- FAIR    if within 5 cents of current price
+- SKIP    if arguments are contradictory or evidence is too thin
+- confidence = "high" only if both sides agree on direction OR one side has \
+  clearly superior data
+
+RESPOND with ONLY a valid JSON object — no markdown fences, no extra text:
+{{
+  "fair_value": <float 0.0-1.0>,
+  "confidence": "<low|medium|high>",
+  "verdict": "<BUY_YES|BUY_NO|FAIR|SKIP>",
+  "edge_pct": <signed float — positive means YES is cheap>,
+  "reasoning": "<2-3 sentences citing the strongest facts from both sides>",
+  "key_facts": ["<most important fact>", "<2nd fact>", "<3rd fact>"],
+  "sportsbook_implied": <float 0.0-1.0 or null>,
+  "bull_summary": "<1 sentence>",
+  "bear_summary": "<1 sentence>"
+}}
+"""
+
+SINGLE_AGENT_PROMPT = """\
+You are an expert sports betting analyst. Use the data below to determine \
+whether this prediction market is mispriced.
 
 MARKET QUESTION: "{question}"
 Current YES price: {yes_pct}%  |  Current NO price: {no_pct}%
@@ -120,42 +204,36 @@ Current YES price: {yes_pct}%  |  Current NO price: {no_pct}%
 LIVE WEB SEARCH RESULTS:
 {web_context}
 
-TASK:
-Based on the search results above, determine the true fair probability for \
-YES resolving. Identify any mispricing vs the current Polymarket price.
-
-RESPOND with ONLY a valid JSON object — no markdown fences, no extra text:
+RESPOND with ONLY a valid JSON object — no markdown fences:
 {{
   "fair_value": <float 0.0-1.0>,
   "confidence": "<low|medium|high>",
   "verdict": "<BUY_YES|BUY_NO|FAIR|SKIP>",
-  "edge_pct": <signed float — positive means YES is cheap, e.g. +12.5>,
-  "reasoning": "<2-3 sentences citing specific facts from the search results>",
+  "edge_pct": <signed float>,
+  "reasoning": "<2-3 sentences citing specific facts>",
   "key_facts": ["<fact>", "<fact>", "<fact>"],
-  "sportsbook_implied": <float 0.0-1.0 or null if not found>
+  "sportsbook_implied": <float 0.0-1.0 or null>
 }}
 
 Verdict rules:
 - BUY_YES if fair_value > yes_price + 0.05
 - BUY_NO  if fair_value < yes_price - 0.05
 - FAIR    if within 5 cents of current price
-- SKIP    if the search results contain insufficient relevant data
-- Set confidence = "high" only if 3+ independent data points support your verdict
-- Be specific: name teams, cite scores, rankings, odds from the sources above
+- SKIP    if insufficient data
+- confidence = "high" only if 3+ independent data points support the verdict
 """
 
-PROMPT_NO_DATA = """\
+NO_DATA_PROMPT = """\
 You are an expert sports betting analyst. No live web data was available, \
-so use your training knowledge to analyse this market.
+so use your training knowledge.
 
 MARKET QUESTION: "{question}"
 Current YES price: {yes_pct}%  |  Current NO price: {no_pct}%
 
-Based on your knowledge of sports statistics, typical outcomes, team/player \
-quality and historical base rates, give your best estimate of fair value.
-Note in your reasoning that this is based on training data, not live info.
+Give your best estimate of fair value based on historical base rates and \
+general knowledge. Note in reasoning that this uses training data only.
 
-RESPOND with ONLY a valid JSON object — no markdown fences, no extra text:
+RESPOND with ONLY a valid JSON object — no markdown fences:
 {{
   "fair_value": <float 0.0-1.0>,
   "confidence": "low",
@@ -168,8 +246,10 @@ RESPOND with ONLY a valid JSON object — no markdown fences, no extra text:
 """
 
 
-def _call_gemini_raw(prompt: str) -> dict:
-    """Send a plain prompt to Gemini — no tools, no billing needed."""
+# ── Gemini HTTP call (sync) ───────────────────────────────────────────────────
+
+def _call_gemini_raw(prompt: str, max_tokens: int = 4096) -> dict:
+    """Send a plain prompt to Gemini. Returns parsed dict or {"error": ...}."""
     if not GEMINI_API_KEY:
         return {"error": "GEMINI_API_KEY not set in .env"}
 
@@ -180,18 +260,16 @@ def _call_gemini_raw(prompt: str) -> dict:
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
-                    "maxOutputTokens": 4096,
+                    "maxOutputTokens": max_tokens,
                     "temperature":     0.1,
-                    # Forces Gemini to output perfect JSON, preventing formatting cut-offs
-                    "responseMimeType": "application/json", 
+                    "responseMimeType": "application/json",
                 },
-                # Disables default blocks so sports betting keywords don't abort the generation
                 "safetySettings": [
                     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"}
-                ]
+                    {"category": "HARM_CATEGORY_HARASSMENT",         "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_HATE_SPEECH",        "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",  "threshold": "BLOCK_NONE"},
+                ],
             },
             timeout=30,
         )
@@ -205,7 +283,6 @@ def _call_gemini_raw(prompt: str) -> dict:
 
         data       = resp.json()
         candidates = data.get("candidates", [])
-
         if not candidates:
             reason = data.get("promptFeedback", {}).get("blockReason", "no candidates")
             return {"error": f"Gemini returned no candidates: {reason}"}
@@ -221,25 +298,15 @@ def _call_gemini_raw(prompt: str) -> dict:
         raw = re.sub(r"\n?```$",        "", raw.strip())
 
         try:
-            parsed = json.loads(raw)
+            return json.loads(raw)
         except json.JSONDecodeError:
             match = re.search(r"\{.*\}", raw, re.DOTALL)
             if not match:
                 return {"error": f"No JSON in response. Raw: {raw[:400]}"}
             try:
-                parsed = json.loads(match.group())
+                return json.loads(match.group())
             except Exception as e:
                 return {"error": f"JSON parse failed: {e}. Raw: {raw[:400]}"}
-
-        return {
-            "fair_value":         float(parsed.get("fair_value", 0.5)),
-            "confidence":         str(parsed.get("confidence", "low")),
-            "verdict":            str(parsed.get("verdict", "SKIP")),
-            "edge_pct":           float(parsed.get("edge_pct", 0)),
-            "reasoning":          str(parsed.get("reasoning", "")),
-            "key_facts":          list(parsed.get("key_facts", [])),
-            "sportsbook_implied": parsed.get("sportsbook_implied"),
-        }
 
     except requests.exceptions.Timeout:
         return {"error": "Gemini timed out (30s). Try again."}
@@ -247,27 +314,101 @@ def _call_gemini_raw(prompt: str) -> dict:
         return {"error": f"{type(e).__name__}: {e}"}
 
 
+# ── Async wrapper so Bull + Bear run in parallel ──────────────────────────────
+
+async def _call_gemini_async(prompt: str, max_tokens: int = 2048) -> dict:
+    """Runs the blocking _call_gemini_raw in a thread so asyncio can parallelize."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: _call_gemini_raw(prompt, max_tokens))
+
+
+# ── Multi-Agent Debate Pipeline ───────────────────────────────────────────────
+
+async def _multi_agent_debate(question: str, yes_price: float, web_context: str) -> dict:
+    """
+    Runs Bull and Bear prompts in parallel, then feeds their output to the Judge.
+    Falls back to single-agent if either side errors.
+    """
+    yes_pct = round(yes_price * 100)
+    no_pct  = round((1 - yes_price) * 100)
+
+    bull_prompt = BULL_PROMPT.format(
+        question=question, yes_pct=yes_pct,
+        web_context=web_context or "(no live data available)"
+    )
+    bear_prompt = BEAR_PROMPT.format(
+        question=question, yes_pct=yes_pct,
+        web_context=web_context or "(no live data available)"
+    )
+
+    # Run Bull and Bear concurrently
+    bull_raw, bear_raw = await asyncio.gather(
+        _call_gemini_async(bull_prompt),
+        _call_gemini_async(bear_prompt),
+    )
+
+    # If either side errored, fall back to single-agent
+    if "error" in bull_raw or "error" in bear_raw:
+        fallback_prompt = (SINGLE_AGENT_PROMPT if web_context else NO_DATA_PROMPT).format(
+            question=question, yes_pct=yes_pct, no_pct=no_pct,
+            web_context=web_context,
+        )
+        result = _call_gemini_raw(fallback_prompt)
+        result["debate_mode"] = False
+        return result
+
+    bull_prob = round((bull_raw.get("bull_implied_prob", yes_price)) * 100)
+    bear_prob = round((bear_raw.get("bear_implied_prob", yes_price)) * 100)
+
+    judge_prompt = JUDGE_PROMPT.format(
+        question=question,
+        yes_pct=yes_pct,
+        no_pct=no_pct,
+        bull_case=bull_raw.get("bull_case", ""),
+        bull_facts=json.dumps(bull_raw.get("bull_facts", [])),
+        bull_prob=bull_prob,
+        bear_case=bear_raw.get("bear_case", ""),
+        bear_facts=json.dumps(bear_raw.get("bear_facts", [])),
+        bear_prob=bear_prob,
+    )
+
+    judge_raw = _call_gemini_raw(judge_prompt, max_tokens=4096)
+
+    if "error" in judge_raw:
+        return judge_raw
+
+    return {
+        "fair_value":         float(judge_raw.get("fair_value", 0.5)),
+        "confidence":         str(judge_raw.get("confidence", "low")),
+        "verdict":            str(judge_raw.get("verdict", "SKIP")),
+        "edge_pct":           float(judge_raw.get("edge_pct", 0)),
+        "reasoning":          str(judge_raw.get("reasoning", "")),
+        "key_facts":          list(judge_raw.get("key_facts", [])),
+        "sportsbook_implied": judge_raw.get("sportsbook_implied"),
+        # Debate-specific fields shown in the UI
+        "debate_mode":   True,
+        "bull_summary":  str(bull_raw.get("bull_case", "")[:200]),
+        "bear_summary":  str(bear_raw.get("bear_case", "")[:200]),
+        "bull_prob":     bull_prob,
+        "bear_prob":     bear_prob,
+    }
+
+
 # ── Public: call_gemini (also used by debug endpoint) ─────────────────────────
 
 def call_gemini(question: str, yes_price: float) -> dict:
-    """Full pipeline: Tavily search → Gemini reasoning."""
+    """Full pipeline: Tavily search → multi-agent debate → structured verdict."""
     web_context = _tavily_search(question)
 
-    if web_context:
-        prompt = PROMPT_WITH_DATA.format(
-            question=question,
-            yes_pct=round(yes_price * 100),
-            no_pct=round((1 - yes_price) * 100),
-            web_context=web_context,
-        )
-    else:
-        prompt = PROMPT_NO_DATA.format(
-            question=question,
-            yes_pct=round(yes_price * 100),
-            no_pct=round((1 - yes_price) * 100),
-        )
+    # Run the async debate pipeline in a new event loop
+    try:
+        loop   = asyncio.new_event_loop()
+        result = loop.run_until_complete(_multi_agent_debate(question, yes_price, web_context))
+        loop.close()
+    except Exception as e:
+        result = {"error": f"Debate pipeline failed: {e}"}
 
-    return _call_gemini_raw(prompt)
+    return result
 
 
 # ── Public: analyze (called by route) ────────────────────────────────────────
@@ -275,7 +416,7 @@ def call_gemini(question: str, yes_price: float) -> dict:
 def analyze(cache_key: str, question: str, yes_price: float) -> tuple[dict, bool]:
     """
     Returns (result_dict, from_cache).
-    Checks MongoDB cache first; on miss runs Tavily + Gemini and caches result.
+    Checks MongoDB cache first; on miss runs Tavily + multi-agent debate and caches.
     """
     if not cache_key:
         cache_key = hashlib.md5(question.encode()).hexdigest()

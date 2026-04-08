@@ -69,6 +69,7 @@ body::before {
 
 /* ── MARKETS ────────────────────────────────────────────────────────── */
 #screen-markets { flex-direction:column; align-items:stretch; }
+#screen-performance { flex-direction:column; align-items:stretch; }
 .markets-header { padding:1.2rem 2rem; border-bottom:1px solid var(--border); background:var(--surface); display:flex; align-items:center; gap:1rem; position:sticky; top:0; z-index:10; flex-wrap:wrap; }
 .markets-logo { font-weight:800; font-size:1.1rem; letter-spacing:-.02em; }
 .markets-logo span { color:var(--accent); }
@@ -84,30 +85,25 @@ body::before {
 .filter-panel { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1rem 1.2rem; margin-bottom:1.5rem; }
 .filter-panel-title { font-family:var(--mono); font-size:.68rem; color:var(--muted); letter-spacing:.1em; text-transform:uppercase; margin-bottom:.8rem; }
 .filter-row { display:flex; gap:.5rem; flex-wrap:wrap; }
-.filter-chip { background:var(--surface2); border:1px solid var(--border); color:var(--muted); padding:.38rem .85rem; border-radius:6px; font-size:.78rem; cursor:pointer; transition:all .15s; font-family:var(--sans); white-space:nowrap; }
-.filter-chip:hover { border-color:var(--muted); color:var(--text); }
-.filter-chip.active { background:rgba(0,230,118,.1); border-color:var(--accent); color:var(--accent); font-weight:600; }
-.subfilter-row { display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.7rem; padding-top:.7rem; border-top:1px solid var(--border); align-items:center; }
-.subfilter-label { font-family:var(--mono); font-size:.68rem; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; margin-right:.3rem; }
-.subfilter-chip { background:transparent; border:1px solid var(--border); color:var(--muted); padding:.3rem .7rem; border-radius:6px; font-size:.73rem; cursor:pointer; transition:all .15s; font-family:var(--mono); }
-.subfilter-chip:hover { border-color:var(--muted); color:var(--text); }
-.subfilter-chip.active-all { background:rgba(0,176,255,.08); border-color:var(--accent2); color:var(--accent2); }
-.subfilter-chip.active-yes { background:rgba(0,230,118,.1);  border-color:var(--accent);  color:var(--accent); }
-.subfilter-chip.active-no  { background:rgba(255,68,68,.1);  border-color:var(--danger);  color:var(--danger); }
+.filter-chip { background:transparent; border:1px solid var(--border); color:var(--muted); padding:.32rem .75rem; border-radius:99px; font-size:.78rem; cursor:pointer; font-family:var(--sans); transition:all .15s; }
+.filter-chip:hover,.filter-chip.active { border-color:var(--accent); color:var(--accent); background:rgba(0,230,118,.06); }
+.subfilter-row { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin-top:.75rem; padding-top:.75rem; border-top:1px solid var(--border); }
+.subfilter-label { font-family:var(--mono); font-size:.68rem; color:var(--muted); }
+.subfilter-chip { background:transparent; border:1px solid var(--border); color:var(--muted); padding:.25rem .65rem; border-radius:99px; font-size:.75rem; cursor:pointer; font-family:var(--sans); transition:all .15s; }
+.subfilter-chip.active-all  { border-color:var(--muted);   color:var(--text);   background:rgba(255,255,255,.04); }
+.subfilter-chip.active-yes  { border-color:var(--accent);  color:var(--accent); background:rgba(0,230,118,.08); }
+.subfilter-chip.active-no   { border-color:var(--danger);  color:var(--danger); background:rgba(255,68,68,.08); }
 
-/* ── Market card ─────────────────────────────────────────────────── */
-.market-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; margin-bottom:1rem; transition:border-color .2s,box-shadow .2s; overflow:hidden; position:relative; }
-.market-card::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:3px 0 0 3px; }
-.market-card.underpriced::before { background:var(--accent); }
-.market-card.value::before       { background:var(--warn); }
-.market-card:hover { border-color:var(--muted); box-shadow:0 4px 24px rgba(0,0,0,.3); }
-.card-main { padding:1.25rem 1.4rem; }
-.card-top { display:flex; align-items:flex-start; gap:1rem; margin-bottom:.9rem; }
+/* Market cards */
+.market-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; margin-bottom:1rem; overflow:hidden; transition:border-color .2s; }
+.market-card:hover { border-color:rgba(0,230,118,.25); }
+.card-body { padding:1.2rem 1.4rem; }
+.card-top { display:flex; gap:.5rem; margin-bottom:.65rem; flex-wrap:wrap; }
 .card-tag { display:inline-flex; align-items:center; gap:.3rem; padding:.2rem .55rem; border-radius:4px; font-family:var(--mono); font-size:.65rem; letter-spacing:.06em; text-transform:uppercase; flex-shrink:0; margin-top:2px; }
 .card-tag.edge  { background:rgba(0,230,118,.1);  color:var(--accent); border:1px solid rgba(0,230,118,.2); }
 .card-tag.value { background:rgba(255,179,0,.1);  color:var(--warn);   border:1px solid rgba(255,179,0,.2); }
 .card-question { font-size:.98rem; font-weight:600; line-height:1.45; letter-spacing:-.01em; flex:1; }
-.card-meta { display:flex; align-items:center; gap:1.2rem; flex-wrap:wrap; }
+.card-meta { display:flex; align-items:center; gap:1.2rem; flex-wrap:wrap; margin-top:.8rem; }
 .price-block { display:flex; flex-direction:column; gap:.1rem; }
 .price-label { font-family:var(--mono); font-size:.62rem; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; }
 .price-val { font-family:var(--mono); font-size:1.05rem; font-weight:500; }
@@ -171,6 +167,99 @@ body::before {
 .action-btn.ai-btn   { background:rgba(0,176,255,.12); border:1px solid rgba(0,176,255,.3); color:var(--accent2); }
 .ai-error { padding:1rem 1.4rem; font-size:.79rem; color:var(--warn); font-family:var(--mono); }
 
+/* ── DEBATE MODE (Feature 2) ─────────────────────────────────────── */
+.debate-badge {
+  display:inline-flex; align-items:center; gap:.3rem;
+  padding:.22rem .6rem; border-radius:5px; font-family:var(--mono); font-size:.65rem;
+  background:rgba(255,179,0,.1); color:var(--warn); border:1px solid rgba(255,179,0,.25);
+}
+.debate-loading {
+  display:flex; flex-direction:column; gap:.5rem; padding:.5rem 0;
+}
+.agent-loading {
+  font-family:var(--mono); font-size:.75rem; color:var(--muted);
+  padding:.4rem .7rem; border-radius:6px; border:1px solid var(--border);
+  background:var(--surface); transition:all .4s ease;
+  display:flex; align-items:center; gap:.5rem;
+}
+.agent-loading::before { content:''; display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--border); }
+.agent-loading.agent-done::before  { background:var(--accent); }
+.agent-loading.agent-active::before { background:var(--warn); animation:pulse 1s infinite; }
+.agent-loading.agent-done  { color:var(--accent); border-color:rgba(0,230,118,.2); background:rgba(0,230,118,.04); }
+.agent-loading.agent-active { color:var(--warn);   border-color:rgba(255,179,0,.3);  background:rgba(255,179,0,.04); }
+
+.debate-summary {
+  margin-bottom:1rem; border:1px solid var(--border); border-radius:8px; overflow:hidden;
+}
+.debate-side {
+  padding:.75rem 1rem; display:flex; flex-direction:column; gap:.3rem;
+}
+.debate-side.bull-side { background:rgba(0,230,118,.04); border-bottom:1px solid var(--border); }
+.debate-side.bear-side { background:rgba(255,68,68,.04);  border-bottom:1px solid var(--border); }
+.debate-label {
+  font-family:var(--mono); font-size:.65rem; font-weight:600;
+  letter-spacing:.06em; text-transform:uppercase;
+}
+.bull-side .debate-label { color:var(--accent); }
+.bear-side .debate-label { color:var(--danger); }
+.debate-text { font-size:.81rem; color:var(--muted); line-height:1.5; }
+.debate-divider {
+  padding:.55rem 1rem; background:rgba(0,176,255,.06);
+  font-family:var(--mono); font-size:.7rem; color:var(--accent2);
+  letter-spacing:.05em; text-align:center;
+}
+
+/* ── PERFORMANCE DASHBOARD (Feature 1) ──────────────────────────── */
+#screen-performance { flex-direction:column; align-items:stretch; }
+
+/* KPI Cards */
+.kpi-card {
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  padding:1.2rem 1.4rem; display:flex; flex-direction:column; gap:.4rem;
+  transition:border-color .2s;
+}
+.kpi-card.kpi-good    { border-color:rgba(0,230,118,.35); background:rgba(0,230,118,.03); }
+.kpi-card.kpi-bad     { border-color:rgba(255,68,68,.35);  background:rgba(255,68,68,.03); }
+.kpi-card.kpi-neutral { border-color:rgba(255,179,0,.35);  background:rgba(255,179,0,.03); }
+.kpi-val {
+  font-family:var(--mono); font-size:2rem; font-weight:500;
+  color:var(--text); line-height:1;
+}
+.kpi-card.kpi-good  .kpi-val { color:var(--accent); }
+.kpi-card.kpi-bad   .kpi-val { color:var(--danger); }
+.kpi-card.kpi-neutral .kpi-val { color:var(--warn); }
+.kpi-label {
+  font-family:var(--mono); font-size:.65rem; color:var(--muted);
+  letter-spacing:.08em; text-transform:uppercase;
+}
+
+/* Prediction cards */
+.pred-card {
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  padding:1rem 1.2rem; margin-bottom:.8rem;
+  display:flex; align-items:flex-start; gap:.9rem;
+  transition:border-color .2s;
+}
+.pred-card.pred-won  { border-color:rgba(0,230,118,.2); }
+.pred-card.pred-lost { border-color:rgba(255,68,68,.2); }
+.pred-status { font-size:1.3rem; flex-shrink:0; margin-top:.1rem; }
+.pred-body { flex:1; min-width:0; }
+.pred-question { font-size:.88rem; font-weight:600; line-height:1.4; margin-bottom:.5rem; }
+.pred-meta { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+.pred-result {
+  font-family:var(--mono); font-size:.72rem; font-weight:600;
+  padding:.28rem .65rem; border-radius:5px; flex-shrink:0;
+  letter-spacing:.04em;
+}
+.pred-result.pred-won     { background:rgba(0,230,118,.12); color:var(--accent); border:1px solid rgba(0,230,118,.3); }
+.pred-result.pred-lost    { background:rgba(255,68,68,.12);  color:var(--danger); border:1px solid rgba(255,68,68,.3); }
+.pred-result.pred-pending { background:rgba(90,97,128,.12);  color:var(--muted);  border:1px solid var(--border); }
+
+/* confidence tag coloring in predictions list */
+.conf-high   { background:rgba(0,230,118,.1)!important; color:var(--accent)!important;  border:1px solid rgba(0,230,118,.2)!important; }
+.conf-medium { background:rgba(0,176,255,.1)!important; color:var(--accent2)!important; border:1px solid rgba(0,176,255,.2)!important; }
+.conf-low    { background:rgba(90,97,128,.1)!important; color:var(--muted)!important;   border:1px solid var(--border)!important; }
+
 /* ── Misc ────────────────────────────────────────────────────────── */
 .loading-state { text-align:center; padding:4rem 2rem; }
 .spinner { width:36px; height:36px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite; margin:0 auto 1rem; }
@@ -187,4 +276,5 @@ body::before {
   .chat-body { padding:1.2rem 1rem; }
   .markets-header { gap:.5rem; }
   .compare-row { gap:.8rem; }
+  .debate-summary { font-size:.8rem; }
 }

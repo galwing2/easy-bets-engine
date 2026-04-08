@@ -8,9 +8,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 
 from config import ALLOWED_ORIGINS, MODEL_PATH
-from api.routes import sessions, markets, analysis, auth, alerts
+from api.routes import sessions, markets, analysis, auth, alerts, predictions   # ← added predictions
 
-app = FastAPI(title="EasyBets API", version="2.0.0")
+app = FastAPI(title="EasyBets API", version="3.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -34,6 +34,7 @@ app.include_router(markets.router)
 app.include_router(analysis.router)
 app.include_router(auth.router)
 app.include_router(alerts.router)
+app.include_router(predictions.router)   # ← new: Track Record dashboard data
 
 FRONTEND = Path(__file__).parent.parent / "frontend"
 app.mount("/static", StaticFiles(directory=str(FRONTEND / "static")), name="static")
