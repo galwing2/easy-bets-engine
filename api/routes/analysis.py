@@ -17,11 +17,9 @@ async def analyze_market(body: AnalyzeRequest):
     """
     Lazy-loaded per card. Returns cached MongoDB result (<6 hrs) or calls the
     multi-agent debate pipeline.
-
-    Auto-saves high/medium-confidence BUY verdicts to the predictions
-    collection so the Track Record dashboard can track AI accuracy over time.
     """
-    result, from_cache = analyze(body.cache_key, body.question, body.yes_price)
+    # AWAIT the updated analyze function
+    result, from_cache = await analyze(body.cache_key, body.question, body.yes_price)
 
     # ── Feature 1: auto-save high/medium-confidence BUY verdicts ─────────────
     if not from_cache and "error" not in result:
@@ -52,7 +50,6 @@ async def analyze_market(body: AnalyzeRequest):
                 })
 
     return {"result": result, "from_cache": from_cache}
-
 
 @router.get("/debug")
 def debug():
@@ -113,7 +110,8 @@ def debug():
 
 
 @router.get("/debug-analyze")
-def debug_analyze():
+async def debug_analyze():
     """Fires a real Tavily + multi-agent debate call end-to-end."""
-    result = call_gemini("Will Real Madrid win the Champions League 2025-26?", 0.35)
+    # AWAIT the call_gemini function here too
+    result = await call_gemini("Will Real Madrid win the Champions League 2025-26?", 0.35)
     return {"result": result}

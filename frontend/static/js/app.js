@@ -190,43 +190,68 @@ function renderMarkets(markets) {
 function buildCard(m) {
   const card = document.createElement('div');
   const eClass = (m.edge || 0) > 0 ? 'positive' : 'negative';
+  const tType  = (m.edge || 0) > 0 ? 'edge' : 'value';
   const tLabel = (m.edge || 0) > 0 ? '📈 EDGE' : '🎯 VALUE';
-  const edgeStr = m.edge != null
-    ? `${m.edge > 0 ? '+' : ''}${(m.edge * 100).toFixed(1)}¢`
-    : '—';
+  const eTxt   = m.edge != null ? `${m.edge > 0 ? '+' : ''}${(m.edge * 100).toFixed(1)}¢` : '—';
 
-  card.className = 'market-card';
+  card.className = `market-card ${(m.edge || 0) > 0 ? 'underpriced' : 'value'}`;
   card.id = `market-${m.market_slug}`;
-  card.dataset.cacheKey  = m.cache_key;
+  card.dataset.cacheKey  = m.cache_key || '';
   card.dataset.question  = m.question;
   card.dataset.yesPrice  = m.yes_price;
-  card.dataset.polyUrl   = m.poly_url;
+  card.dataset.polyUrl   = m.poly_url || 'https://polymarket.com';
   card.dataset.marketSlug = m.market_slug || '';
   card.dataset.endDate   = m.end_date || '';
 
   card.innerHTML = `
-    <div class="card-body">
-      <div class="card-top">
-        <span class="card-tag ${(m.edge || 0) > 0 ? 'edge' : 'value'}">${tLabel}</span>
-        <span class="card-tag" style="background:rgba(90,97,128,.12); color:var(--muted); border:1px solid var(--border);">${m.category || ''}</span>
+    <div class="card-main">
+      <div class="card-top" style="align-items:flex-start;">
+        <div style="display:flex; flex-direction:column; gap:.3rem; margin-top:2px; flex-shrink:0;">
+            <span class="card-tag ${tType}">${tLabel}</span>
+            ${m.category ? `<span class="card-tag" style="background:rgba(90,97,128,.12); color:var(--muted); border:1px solid var(--border);">${m.category}</span>` : ''}
+        </div>
+        <div class="card-question">${m.question}</div>
       </div>
-      <div class="card-question">${m.question}</div>
       <div class="card-meta">
-        <div class="price-block"><span class="price-label">YES</span><span class="price-val yes">${(m.yes_price * 100).toFixed(0)}¢</span></div>
-        <div class="price-block"><span class="price-label">NO</span><span class="price-val no">${(m.no_price * 100).toFixed(0)}¢</span></div>
+        <div class="price-block">
+          <span class="price-label">YES</span>
+          <span class="price-val yes">${(m.yes_price * 100).toFixed(0)}¢</span>
+        </div>
+        <div class="price-block">
+          <span class="price-label">NO</span>
+          <span class="price-val no">${(m.no_price != null ? (m.no_price * 100).toFixed(0) : ((1-m.yes_price)*100).toFixed(0))}¢</span>
+        </div>
         ${m.end_date ? `<div class="price-block"><span class="price-label">Ends</span><span class="price-val" style="font-size:.85rem;">${m.end_date}</span></div>` : ''}
-        <div class="edge-badge ${eClass}">${edgeStr}</div>
+        <div class="edge-badge ${eClass}">${eTxt} edge</div>
       </div>
-      <div class="card-actions">
-        <button class="action-btn ai-btn" onclick="triggerAnalysis(this.closest('.market-card'))">🤖 Analyze Market</button>
-        <a href="${m.poly_url}" target="_blank"><button class="action-btn poly-btn">Polymarket ↗</button></a>
-        ${!S.isGuest ? `<button class="action-btn poly-btn" onclick="openAlertModal(this.closest('.market-card'))">🔔 Set Alert</button>` : ''}
+      <div class="card-actions" style="margin-top:.9rem">
+        <button class="action-btn yes-btn" onclick="window.open('${m.poly_url || 'https://polymarket.com'}','_blank')">Bet YES ↗</button>
+        <button class="action-btn no-btn" onclick="window.open('${m.poly_url || 'https://polymarket.com'}','_blank')">Bet NO ↗</button>
+        <button class="action-btn poly-btn" onclick="window.open('${m.poly_url || 'https://polymarket.com'}','_blank')">Polymarket ↗</button>
+        ${!S.isGuest ? `<button class="action-btn poly-btn alert-btn">🔔 Alert</button>` : ''}
+        <button class="action-btn ai-btn">🤖 Analyze Market</button>
       </div>
     </div>
     <div class="ai-panel" style="display:none;"></div>`;
+
+  card.querySelector('.ai-btn').addEventListener('click', () => triggerAnalysis(card));
+  
+  const alertBtn = card.querySelector('.alert-btn');
+  if (alertBtn) {
+    alertBtn.addEventListener('click', () => {
+      if (S.isGuest) {
+          alert("You must sign in to save alerts!");
+          return;
+      }
+      currentAlertMarket = m;
+      document.getElementById('alert-q').textContent = m.question;
+      document.getElementById('alert-error').textContent = "";
+      document.getElementById('alert-modal').style.display = "flex";
+    });
+  }
+
   return card;
 }
-
 /* ─── Alerts ─────────────────────────────────────────────── */
 
 function openAlertModal(card) {

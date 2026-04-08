@@ -396,15 +396,13 @@ async def _multi_agent_debate(question: str, yes_price: float, web_context: str)
 
 # ── Public: call_gemini (also used by debug endpoint) ─────────────────────────
 
-def call_gemini(question: str, yes_price: float) -> dict:
+async def call_gemini(question: str, yes_price: float) -> dict:
     """Full pipeline: Tavily search → multi-agent debate → structured verdict."""
     web_context = _tavily_search(question)
 
-    # Run the async debate pipeline in a new event loop
+    # Natively await the async debate pipeline using FastAPI's event loop
     try:
-        loop   = asyncio.new_event_loop()
-        result = loop.run_until_complete(_multi_agent_debate(question, yes_price, web_context))
-        loop.close()
+        result = await _multi_agent_debate(question, yes_price, web_context)
     except Exception as e:
         result = {"error": f"Debate pipeline failed: {e}"}
 
@@ -413,7 +411,7 @@ def call_gemini(question: str, yes_price: float) -> dict:
 
 # ── Public: analyze (called by route) ────────────────────────────────────────
 
-def analyze(cache_key: str, question: str, yes_price: float) -> tuple[dict, bool]:
+async def analyze(cache_key: str, question: str, yes_price: float) -> tuple[dict, bool]:
     """
     Returns (result_dict, from_cache).
     Checks MongoDB cache first; on miss runs Tavily + multi-agent debate and caches.
@@ -425,7 +423,8 @@ def analyze(cache_key: str, question: str, yes_price: float) -> tuple[dict, bool
     if cached:
         return cached, True
 
-    result = call_gemini(question, yes_price)
+    # Now we await the gemini call
+    result = await call_gemini(question, yes_price)
     if "error" not in result:
         _cache_set(cache_key, result)
 
