@@ -341,11 +341,13 @@ async def _multi_agent_debate(question: str, yes_price: float, web_context: str)
         web_context=web_context or "(no live data available)"
     )
 
-    # Run Bull and Bear concurrently
-    bull_raw, bear_raw = await asyncio.gather(
-        _call_gemini_async(bull_prompt),
-        _call_gemini_async(bear_prompt),
-    )
+# Run Bull and Bear sequentially to avoid Google's Free Tier burst limit
+    bull_raw = await _call_gemini_async(bull_prompt)
+    
+    # Add a tiny 1-second breather for the API
+    await asyncio.sleep(1) 
+    
+    bear_raw = await _call_gemini_async(bear_prompt)
 
     # If either side errored, fall back to single-agent
     if "error" in bull_raw or "error" in bear_raw:
