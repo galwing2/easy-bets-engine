@@ -16,6 +16,7 @@ Public interface:
 
 import re
 import json
+import time
 import asyncio
 import hashlib
 from datetime import datetime, timezone, timedelta
@@ -246,73 +247,87 @@ RESPOND with ONLY a valid JSON object — no markdown fences:
 """
 
 
-# ── Gemini HTTP call (sync) ───────────────────────────────────────────────────
+# ── Gemini HTTP call (sync with automatic retries) ────────────────────────────
 
 def _call_gemini_raw(prompt: str, max_tokens: int = 4096) -> dict:
-    """Send a plain prompt to Gemini. Returns parsed dict or {"error": ...}."""
+    """Send a plain prompt to Gemini. Includes automatic retries for 503/429 errors."""
     if not GEMINI_API_KEY:
         return {"error": "GEMINI_API_KEY not set in .env"}
 
-    try:
-        resp = requests.post(
-            f"{GEMINI_URL}?key={GEMINI_API_KEY}",
-            headers={"Content-Type": "application/json"},
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "maxOutputTokens": max_tokens,
-                    "temperature":     0.1,
-                    "responseMimeType": "application/json",
-                },
-                "safetySettings": [
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HARASSMENT",         "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH",        "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",  "threshold": "BLOCK_NONE"},
-                ],
-            },
-            timeout=30,
-        )
-
-        if not resp.ok:
-            try:
-                msg = resp.json().get("error", {}).get("message", resp.text[:300])
-            except Exception:
-                msg = resp.text[:300]
-            return {"error": f"Gemini HTTP {resp.status_code}: {msg}"}
-
-        data       = resp.json()
-        candidates = data.get("candidates", [])
-        if not candidates:
-            reason = data.get("promptFeedback", {}).get("blockReason", "no candidates")
-            return {"error": f"Gemini returned no candidates: {reason}"}
-
-        parts = candidates[0].get("content", {}).get("parts", [])
-        raw   = "\n".join(p.get("text", "") for p in parts if "text" in p).strip()
-
-        if not raw:
-            finish = candidates[0].get("finishReason", "unknown")
-            return {"error": f"Gemini returned empty text. finishReason={finish}"}
-
-        raw = re.sub(r"^```[a-z]*\n?", "", raw.strip())
-        raw = re.sub(r"\n?```$",        "", raw.strip())
-
+    max_retries = 3
+    for attempt in range(max_retries):
         try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if not match:
-                return {"error": f"No JSON in response. Raw: {raw[:400]}"}
+            resp = requests.post(
+                f"{GEMINI_URL}?key={GEMINI_API_KEY}",
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "maxOutputTokens": max_tokens,
+                        "temperature":     0.1,
+                        "responseMimeType": "application/json",
+                    },
+                    "safetySettings": [
+                        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_HARASSMENT",         "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_HATE_SPEECH",        "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",  "threshold": "BLOCK_NONE"},
+                    ],
+                },
+                timeout=30,
+            )
+
+            # If Google is overloaded (503) or rate-limiting us (429), sleep and retry
+            if resp.status_code in [503, 429]:
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)  # Sleeps for 1s, then 2s
+                    continue
+                else:
+                    return {"error": f"Gemini HTTP {resp.status_code}: Service Overloaded. Please try again."}
+
+            if not resp.ok:
+                try:
+                    msg = resp.json().get("error", {}).get("message", resp.text[:300])
+                except Exception:
+                    msg = resp.text[:300]
+                return {"error": f"Gemini HTTP {resp.status_code}: {msg}"}
+
+            data       = resp.json()
+            candidates = data.get("candidates", [])
+            if not candidates:
+                reason = data.get("promptFeedback", {}).get("blockReason", "no candidates")
+                return {"error": f"Gemini returned no candidates: {reason}"}
+
+            parts = candidates[0].get("content", {}).get("parts", [])
+            raw   = "\n".join(p.get("text", "") for p in parts if "text" in p).strip()
+
+            if not raw:
+                finish = candidates[0].get("finishReason", "unknown")
+                return {"error": f"Gemini returned empty text. finishReason={finish}"}
+
+            raw = re.sub(r"^```[a-z]*\n?", "", raw.strip())
+            raw = re.sub(r"\n?```$",        "", raw.strip())
+
             try:
-                return json.loads(match.group())
-            except Exception as e:
-                return {"error": f"JSON parse failed: {e}. Raw: {raw[:400]}"}
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                match = re.search(r"\{.*\}", raw, re.DOTALL)
+                if not match:
+                    return {"error": f"No JSON in response. Raw: {raw[:400]}"}
+                try:
+                    return json.loads(match.group())
+                except Exception as e:
+                    return {"error": f"JSON parse failed: {e}. Raw: {raw[:400]}"}
 
-    except requests.exceptions.Timeout:
-        return {"error": "Gemini timed out (30s). Try again."}
-    except Exception as e:
-        return {"error": f"{type(e).__name__}: {e}"}
+        except requests.exceptions.Timeout:
+            if attempt < max_retries - 1:
+                time.sleep(1)
+                continue
+            return {"error": "Gemini timed out (30s) after multiple attempts."}
+        except Exception as e:
+            return {"error": f"{type(e).__name__}: {e}"}
 
+    return {"error": "Unknown error during API call."}
 
 # ── Async wrapper so Bull + Bear run in parallel ──────────────────────────────
 
@@ -326,8 +341,7 @@ async def _call_gemini_async(prompt: str, max_tokens: int = 2048) -> dict:
 
 async def _multi_agent_debate(question: str, yes_price: float, web_context: str) -> dict:
     """
-    Runs Bull and Bear prompts in parallel, then feeds their output to the Judge.
-    Falls back to single-agent if either side errors.
+    Runs Bull, Bear, and Judge sequentially with delays to respect free-tier limits.
     """
     yes_pct = round(yes_price * 100)
     no_pct  = round((1 - yes_price) * 100)
@@ -341,12 +355,13 @@ async def _multi_agent_debate(question: str, yes_price: float, web_context: str)
         web_context=web_context or "(no live data available)"
     )
 
-# Run Bull and Bear sequentially to avoid Google's Free Tier burst limit
+    # 1. Ask the Bull
     bull_raw = await _call_gemini_async(bull_prompt)
     
-    # Add a tiny 1-second breather for the API
-    await asyncio.sleep(1) 
+    # Wait 2 seconds
+    await asyncio.sleep(2)
     
+    # 2. Ask the Bear
     bear_raw = await _call_gemini_async(bear_prompt)
 
     # If either side errored, fall back to single-agent
@@ -355,7 +370,8 @@ async def _multi_agent_debate(question: str, yes_price: float, web_context: str)
             question=question, yes_pct=yes_pct, no_pct=no_pct,
             web_context=web_context,
         )
-        result = _call_gemini_raw(fallback_prompt)
+        await asyncio.sleep(2) # Wait again before fallback
+        result = await _call_gemini_async(fallback_prompt)
         result["debate_mode"] = False
         return result
 
@@ -374,7 +390,11 @@ async def _multi_agent_debate(question: str, yes_price: float, web_context: str)
         bear_prob=bear_prob,
     )
 
-    judge_raw = _call_gemini_raw(judge_prompt, max_tokens=4096)
+    # Wait 2 seconds
+    await asyncio.sleep(2)
+
+    # 3. Ask the Judge
+    judge_raw = await _call_gemini_async(judge_prompt, max_tokens=4096)
 
     if "error" in judge_raw:
         return judge_raw
@@ -387,7 +407,6 @@ async def _multi_agent_debate(question: str, yes_price: float, web_context: str)
         "reasoning":          str(judge_raw.get("reasoning", "")),
         "key_facts":          list(judge_raw.get("key_facts", [])),
         "sportsbook_implied": judge_raw.get("sportsbook_implied"),
-        # Debate-specific fields shown in the UI
         "debate_mode":   True,
         "bull_summary":  str(bull_raw.get("bull_case", "")[:200]),
         "bear_summary":  str(bear_raw.get("bear_case", "")[:200]),
