@@ -27,6 +27,39 @@ from config import GEMINI_API_KEY, GEMINI_URL, TAVILY_API_KEY, ANALYSIS_CACHE_TT
 from api.db import get_db
 
 
+def parse_odds_to_prob(odds_str: str) -> float | None:
+    """Converts American, Fractional, Decimal, or Percentage odds to a probability."""
+    if not odds_str or not isinstance(odds_str, str):
+        return None
+    
+    odds = odds_str.strip().replace(',', '')
+    
+    # 1. Percentage (e.g., "8.5%")
+    if '%' in odds:
+        try: return float(re.sub(r'[^\d.]', '', odds)) / 100.0
+        except: pass
+        
+    # 2. American Odds (e.g., "+1100" or "-150")
+    match = re.search(r'([+-])(\d+)', odds)
+    if match:
+        sign, val = match.groups()
+        val = float(val)
+        if sign == '+' and val > 0: return 100 / (val + 100)
+        if sign == '-' and val > 0: return val / (val + 100)
+
+    # 3. Fractional (e.g., "11/1")
+    match = re.search(r'(\d+)\s*/\s*(\d+)', odds)
+    if match:
+        num, den = map(float, match.groups())
+        if den > 0: return den / (num + den)
+
+    # 4. Decimal (e.g., "12.0")
+    try:
+        val = float(re.sub(r'[^\d.]', '', odds))
+        if val > 1.0: return 1.0 / val
+    except: pass
+
+    return None
 # ── Cache ─────────────────────────────────────────────────────────────────────
 
 def _cache_get(cache_key: str) -> dict | None:
@@ -154,44 +187,24 @@ Respond with ONLY a JSON object — no markdown fences:
 """
 
 JUDGE_PROMPT = """\
-You are THE JUDGE — a senior hedge-fund quant who weighs both sides of a \
-prediction market debate and determines the true fair value.
+You are THE JUDGE — a data extractor analyzing sports betting information.
 
 MARKET QUESTION: "{question}"
-Current Polymarket YES price: {yes_pct}%  |  NO price: {no_pct}%
 
-THE BULL SAYS:
-{bull_case}
-Bull's key facts: {bull_facts}
-Bull's implied YES probability: {bull_prob}%
+THE BULL SAYS: {bull_case}
+THE BEAR SAYS: {bear_case}
 
-THE BEAR SAYS:
-{bear_case}
-Bear's key facts: {bear_facts}
-Bear's implied YES probability: {bear_prob}%
+TASK 1: Read the arguments and extract any specific traditional sportsbook odds mentioned for YES (e.g., "+1100", "11/1", "12.0", "8%"). If none are mentioned, return null.
+TASK 2: Score the fundamental strength of the Bull case from 0-5 (0=no evidence, 5=overwhelming statistical proof).
+TASK 3: Score the fundamental strength of the Bear case from 0-5.
 
-TASK: Weigh the bull and bear arguments critically. Determine the true fair \
-value for YES. Identify which side has stronger evidence and why.
-
-Verdict rules:
-- BUY_YES if fair_value > yes_price + 0.05
-- BUY_NO  if fair_value < yes_price - 0.05
-- FAIR    if within 5 cents of current price
-- SKIP    if arguments are contradictory or evidence is too thin
-- confidence = "high" only if both sides agree on direction OR one side has \
-  clearly superior data
-
-RESPOND with ONLY a valid JSON object — no markdown fences, no extra text:
+RESPOND with ONLY a valid JSON object — no markdown fences:
 {{
-  "fair_value": <float 0.0-1.0>,
-  "confidence": "<low|medium|high>",
-  "verdict": "<BUY_YES|BUY_NO|FAIR|SKIP>",
-  "edge_pct": <signed float — positive means YES is cheap>,
-  "reasoning": "<2-3 sentences citing the strongest facts from both sides>",
-  "key_facts": ["<most important fact>", "<2nd fact>", "<3rd fact>"],
-  "sportsbook_implied": <float 0.0-1.0 or null>,
-  "bull_summary": "<1 sentence>",
-  "bear_summary": "<1 sentence>"
+  "extracted_sportsbook_odds": "<string or null>",
+  "bull_score": <int 0-5>,
+  "bear_score": <int 0-5>,
+  "reasoning": "<2-3 sentences justifying the scores>",
+  "key_facts": ["<most important fact>", "<2nd fact>", "<3rd fact>"]
 }}
 """
 
@@ -370,8 +383,26 @@ async def _multi_agent_debate(question: str, yes_price: float, web_context: str)
             question=question, yes_pct=yes_pct, no_pct=no_pct,
             web_context=web_context,
         )
-        await asyncio.sleep(2) # Wait again before fallback
+        await asyncio.sleep(2) 
         result = await _call_gemini_async(fallback_prompt)
+        
+        # --- OVERRIDE FALLBACK MATH ---
+        if "error" not in result:
+            # Force Python to calculate the edge, ignoring the LLM's math
+            fv = float(result.get("fair_value", yes_price))
+            edge = (fv - yes_price) * 100
+            
+            result["fair_value"] = fv
+            result["edge_pct"]   = edge
+            
+            # Force Python to decide the verdict
+            if edge > 5.0:
+                result["verdict"] = "BUY_YES"
+            elif edge < -5.0:
+                result["verdict"] = "BUY_NO"
+            else:
+                result["verdict"] = "FAIR"
+                
         result["debate_mode"] = False
         return result
 
@@ -399,54 +430,55 @@ async def _multi_agent_debate(question: str, yes_price: float, web_context: str)
     if "error" in judge_raw:
         return judge_raw
 
+    # --- DETERMINISTIC PRICING MATH ---
+    
+    # 1. Establish the Anchor Price
+    sb_prob = parse_odds_to_prob(judge_raw.get("extracted_sportsbook_odds"))
+    
+    if sb_prob is not None:
+        # De-vig assumption: remove ~5% juice from the raw implied probability
+        anchor_price = sb_prob * 0.95 
+        confidence = "high"
+    else:
+        # Fallback to the Polymarket price if no hard odds are found
+        anchor_price = yes_price
+        confidence = "medium"
+
+    # 2. Apply qualitative shift based on LLM feature extraction
+    bull_score = int(judge_raw.get("bull_score", 0))
+    bear_score = int(judge_raw.get("bear_score", 0))
+    
+    # Maximum allowed qualitative shift is strictly bounded to ±3% (0.03)
+    # A max diff of 5 (e.g. Bull 5, Bear 0) results in a full 0.03 shift.
+    score_diff = bull_score - bear_score
+    qualitative_shift = (score_diff / 5.0) * 0.03
+
+    fair_value = anchor_price + qualitative_shift
+    
+    # Clamp fair value between 1% and 99%
+    fair_value = max(0.01, min(0.99, fair_value))
+    
+    # 3. Calculate Edge & Verdict in Python (Fixes the UI bug)
+    edge_pct = fair_value - yes_price
+    
+    if edge_pct > 0.05:
+        verdict = "BUY_YES"
+    elif edge_pct < -0.05:
+        verdict = "BUY_NO"
+    else:
+        verdict = "FAIR"
+
     return {
-        "fair_value":         float(judge_raw.get("fair_value", 0.5)),
-        "confidence":         str(judge_raw.get("confidence", "low")),
-        "verdict":            str(judge_raw.get("verdict", "SKIP")),
-        "edge_pct":           float(judge_raw.get("edge_pct", 0)),
+        "fair_value":         float(fair_value),
+        "confidence":         confidence,
+        "verdict":            verdict,
+        "edge_pct":           float(edge_pct * 100), # Send to frontend as whole percentage cents
         "reasoning":          str(judge_raw.get("reasoning", "")),
         "key_facts":          list(judge_raw.get("key_facts", [])),
-        "sportsbook_implied": judge_raw.get("sportsbook_implied"),
-        "debate_mode":   True,
-        "bull_summary":  str(bull_raw.get("bull_case", "")[:200]),
-        "bear_summary":  str(bear_raw.get("bear_case", "")[:200]),
-        "bull_prob":     bull_prob,
-        "bear_prob":     bear_prob,
+        "sportsbook_implied": sb_prob, # Keep raw probability for the UI comparison
+        "debate_mode":        True,
+        "bull_summary":       str(bull_raw.get("bull_case", "")[:200]),
+        "bear_summary":       str(bear_raw.get("bear_case", "")[:200]),
+        "bull_prob":          bull_prob,
+        "bear_prob":          bear_prob,
     }
-
-
-# ── Public: call_gemini (also used by debug endpoint) ─────────────────────────
-
-async def call_gemini(question: str, yes_price: float) -> dict:
-    """Full pipeline: Tavily search → multi-agent debate → structured verdict."""
-    web_context = _tavily_search(question)
-
-    # Natively await the async debate pipeline using FastAPI's event loop
-    try:
-        result = await _multi_agent_debate(question, yes_price, web_context)
-    except Exception as e:
-        result = {"error": f"Debate pipeline failed: {e}"}
-
-    return result
-
-
-# ── Public: analyze (called by route) ────────────────────────────────────────
-
-async def analyze(cache_key: str, question: str, yes_price: float) -> tuple[dict, bool]:
-    """
-    Returns (result_dict, from_cache).
-    Checks MongoDB cache first; on miss runs Tavily + multi-agent debate and caches.
-    """
-    if not cache_key:
-        cache_key = hashlib.md5(question.encode()).hexdigest()
-
-    cached = _cache_get(cache_key)
-    if cached:
-        return cached, True
-
-    # Now we await the gemini call
-    result = await call_gemini(question, yes_price)
-    if "error" not in result:
-        _cache_set(cache_key, result)
-
-    return result, False
