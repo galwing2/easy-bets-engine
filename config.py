@@ -5,7 +5,7 @@ load_dotenv()
 
 # External APIs
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL: str = "gemini-2.5-flash"
+GEMINI_MODEL: str = "gemini-2.5-flash-lite"
 GEMINI_URL: str = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
 POLYMARKET_GAMMA: str = "https://gamma-api.polymarket.com/events?closed=false&limit=1000&order=volume&ascending=false"
