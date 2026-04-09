@@ -1,31 +1,41 @@
-"""
-api/ai.py — Market analysis using multi-agent AI debate + Tavily web search.
-
-Multi-Agent Flow (Feature 2):
-  1. Tavily searches the web for real-time data about the market question.
-  2. THREE Gemini calls run in parallel via asyncio:
-       • The Bull  — finds every statistical reason YES will happen.
-       • The Bear  — finds every statistical reason NO will happen.
-       • The Judge — reads Bull + Bear outputs and determines fair value.
-  3. Result is cached in MongoDB for 6 hours.
-
-Public interface:
-    analyze(cache_key, question, yes_price) -> (dict, from_cache: bool)
-    call_gemini(question, yes_price)         -> dict
-"""
-
 import re
 import json
-import time
 import asyncio
 import hashlib
+import time
 from datetime import datetime, timezone, timedelta
-
 import requests
 
 from config import GEMINI_API_KEY, GEMINI_URL, TAVILY_API_KEY, ANALYSIS_CACHE_TTL_HOURS
 from api.db import get_db
 
+# ── Cache ─────────────────────────────────────────────────────────────────────
+
+def _cache_get(cache_key: str) -> dict | None:
+    doc = get_db()["market_analysis"].find_one({"cache_key": cache_key})
+    if not doc:
+        return None
+    cached_at = doc.get("cached_at")
+    if not cached_at:
+        return None
+    if isinstance(cached_at, str):
+        cached_at = datetime.fromisoformat(cached_at)
+    if cached_at.tzinfo is None:
+        cached_at = cached_at.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - cached_at > timedelta(hours=ANALYSIS_CACHE_TTL_HOURS):
+        return None
+    doc.pop("_id", None)
+    doc.pop("cached_at", None)
+    return doc
+
+def _cache_set(cache_key: str, analysis: dict) -> None:
+    get_db()["market_analysis"].replace_one(
+        {"cache_key": cache_key},
+        {"cache_key": cache_key, "cached_at": datetime.now(timezone.utc), **analysis},
+        upsert=True,
+    )
+
+# ── Math Parsers ─────────────────────────────────────────────────────────────
 
 def parse_odds_to_prob(odds_str: str) -> float | None:
     """Converts American, Fractional, Decimal, or Percentage odds to a probability."""
@@ -60,46 +70,14 @@ def parse_odds_to_prob(odds_str: str) -> float | None:
     except: pass
 
     return None
-# ── Cache ─────────────────────────────────────────────────────────────────────
-
-def _cache_get(cache_key: str) -> dict | None:
-    doc = get_db()["market_analysis"].find_one({"cache_key": cache_key})
-    if not doc:
-        return None
-    cached_at = doc.get("cached_at")
-    if not cached_at:
-        return None
-    if isinstance(cached_at, str):
-        cached_at = datetime.fromisoformat(cached_at)
-    if cached_at.tzinfo is None:
-        cached_at = cached_at.replace(tzinfo=timezone.utc)
-    if datetime.now(timezone.utc) - cached_at > timedelta(hours=ANALYSIS_CACHE_TTL_HOURS):
-        return None
-    doc.pop("_id", None)
-    doc.pop("cached_at", None)
-    return doc
-
-
-def _cache_set(cache_key: str, analysis: dict) -> None:
-    get_db()["market_analysis"].replace_one(
-        {"cache_key": cache_key},
-        {"cache_key": cache_key, "cached_at": datetime.now(timezone.utc), **analysis},
-        upsert=True,
-    )
-
 
 # ── Step 1: Tavily web search ─────────────────────────────────────────────────
 
 def _tavily_search(question: str) -> str:
-    """
-    Search the web via Tavily and return a formatted context string.
-    Falls back to empty string if Tavily key is missing or call fails.
-    """
+    """Search the web via Tavily and return a formatted context string."""
     if not TAVILY_API_KEY:
         return ""
-
     query = question.strip().rstrip("?")
-
     try:
         resp = requests.post(
             "https://api.tavily.com/search",
@@ -116,29 +94,20 @@ def _tavily_search(question: str) -> str:
             },
             timeout=15,
         )
-
-        if not resp.ok:
-            return ""
-
+        if not resp.ok: return ""
         data    = resp.json()
         results = data.get("results", [])
         answer  = data.get("answer", "")
-
         lines = []
-        if answer:
-            lines.append(f"WEB SUMMARY: {answer}\n")
-
+        if answer: lines.append(f"WEB SUMMARY: {answer}\n")
         for i, r in enumerate(results[:5], 1):
             title   = r.get("title", "")
             url     = r.get("url", "")
             content = r.get("content", "").strip()[:400]
             lines.append(f"[Source {i}] {title}\n{url}\n{content}\n")
-
         return "\n".join(lines)
-
     except Exception:
         return ""
-
 
 # ── Step 2: Multi-Agent Prompts ───────────────────────────────────────────────
 
@@ -228,13 +197,6 @@ RESPOND with ONLY a valid JSON object — no markdown fences:
   "key_facts": ["<fact>", "<fact>", "<fact>"],
   "sportsbook_implied": <float 0.0-1.0 or null>
 }}
-
-Verdict rules:
-- BUY_YES if fair_value > yes_price + 0.05
-- BUY_NO  if fair_value < yes_price - 0.05
-- FAIR    if within 5 cents of current price
-- SKIP    if insufficient data
-- confidence = "high" only if 3+ independent data points support the verdict
 """
 
 NO_DATA_PROMPT = """\
@@ -258,7 +220,6 @@ RESPOND with ONLY a valid JSON object — no markdown fences:
   "sportsbook_implied": null
 }}
 """
-
 
 # ── Gemini HTTP call (sync with automatic retries) ────────────────────────────
 
@@ -290,33 +251,25 @@ def _call_gemini_raw(prompt: str, max_tokens: int = 4096) -> dict:
                 timeout=30,
             )
 
-            # If Google is overloaded (503) or rate-limiting us (429), sleep and retry
             if resp.status_code in [503, 429]:
                 if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)  # Sleeps for 1s, then 2s
+                    time.sleep(2 ** attempt) 
                     continue
                 else:
                     return {"error": f"Gemini HTTP {resp.status_code}: Service Overloaded. Please try again."}
 
             if not resp.ok:
-                try:
-                    msg = resp.json().get("error", {}).get("message", resp.text[:300])
-                except Exception:
-                    msg = resp.text[:300]
+                try: msg = resp.json().get("error", {}).get("message", resp.text[:300])
+                except: msg = resp.text[:300]
                 return {"error": f"Gemini HTTP {resp.status_code}: {msg}"}
 
             data       = resp.json()
             candidates = data.get("candidates", [])
             if not candidates:
-                reason = data.get("promptFeedback", {}).get("blockReason", "no candidates")
-                return {"error": f"Gemini returned no candidates: {reason}"}
+                return {"error": "Gemini returned no candidates"}
 
             parts = candidates[0].get("content", {}).get("parts", [])
             raw   = "\n".join(p.get("text", "") for p in parts if "text" in p).strip()
-
-            if not raw:
-                finish = candidates[0].get("finishReason", "unknown")
-                return {"error": f"Gemini returned empty text. finishReason={finish}"}
 
             raw = re.sub(r"^```[a-z]*\n?", "", raw.strip())
             raw = re.sub(r"\n?```$",        "", raw.strip())
@@ -325,83 +278,60 @@ def _call_gemini_raw(prompt: str, max_tokens: int = 4096) -> dict:
                 return json.loads(raw)
             except json.JSONDecodeError:
                 match = re.search(r"\{.*\}", raw, re.DOTALL)
-                if not match:
-                    return {"error": f"No JSON in response. Raw: {raw[:400]}"}
-                try:
-                    return json.loads(match.group())
-                except Exception as e:
-                    return {"error": f"JSON parse failed: {e}. Raw: {raw[:400]}"}
+                if match:
+                    try: return json.loads(match.group())
+                    except: pass
+                return {"error": f"No JSON in response."}
 
         except requests.exceptions.Timeout:
             if attempt < max_retries - 1:
                 time.sleep(1)
                 continue
-            return {"error": "Gemini timed out (30s) after multiple attempts."}
+            return {"error": "Gemini timed out (30s)."}
         except Exception as e:
             return {"error": f"{type(e).__name__}: {e}"}
 
     return {"error": "Unknown error during API call."}
-
-# ── Async wrapper so Bull + Bear run in parallel ──────────────────────────────
 
 async def _call_gemini_async(prompt: str, max_tokens: int = 2048) -> dict:
     """Runs the blocking _call_gemini_raw in a thread so asyncio can parallelize."""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: _call_gemini_raw(prompt, max_tokens))
 
-
 # ── Multi-Agent Debate Pipeline ───────────────────────────────────────────────
 
 async def _multi_agent_debate(question: str, yes_price: float, web_context: str) -> dict:
-    """
-    Runs Bull, Bear, and Judge sequentially with delays to respect free-tier limits.
-    """
+    """Runs Bull, Bear, and Judge sequentially with deterministic math logic."""
     yes_pct = round(yes_price * 100)
     no_pct  = round((1 - yes_price) * 100)
 
-    bull_prompt = BULL_PROMPT.format(
-        question=question, yes_pct=yes_pct,
-        web_context=web_context or "(no live data available)"
-    )
-    bear_prompt = BEAR_PROMPT.format(
-        question=question, yes_pct=yes_pct,
-        web_context=web_context or "(no live data available)"
-    )
+    bull_prompt = BULL_PROMPT.format(question=question, yes_pct=yes_pct, web_context=web_context or "(no data)")
+    bear_prompt = BEAR_PROMPT.format(question=question, yes_pct=yes_pct, web_context=web_context or "(no data)")
 
-    # 1. Ask the Bull
+    # 1. Ask Bull
     bull_raw = await _call_gemini_async(bull_prompt)
-    
-    # Wait 2 seconds
     await asyncio.sleep(2)
     
-    # 2. Ask the Bear
+    # 2. Ask Bear
     bear_raw = await _call_gemini_async(bear_prompt)
 
-    # If either side errored, fall back to single-agent
+    # Single-Agent Fallback
     if "error" in bull_raw or "error" in bear_raw:
         fallback_prompt = (SINGLE_AGENT_PROMPT if web_context else NO_DATA_PROMPT).format(
-            question=question, yes_pct=yes_pct, no_pct=no_pct,
-            web_context=web_context,
+            question=question, yes_pct=yes_pct, no_pct=no_pct, web_context=web_context
         )
-        await asyncio.sleep(2) 
+        await asyncio.sleep(2)
         result = await _call_gemini_async(fallback_prompt)
         
-        # --- OVERRIDE FALLBACK MATH ---
+        # Override fallback math
         if "error" not in result:
-            # Force Python to calculate the edge, ignoring the LLM's math
             fv = float(result.get("fair_value", yes_price))
             edge = (fv - yes_price) * 100
-            
             result["fair_value"] = fv
             result["edge_pct"]   = edge
-            
-            # Force Python to decide the verdict
-            if edge > 5.0:
-                result["verdict"] = "BUY_YES"
-            elif edge < -5.0:
-                result["verdict"] = "BUY_NO"
-            else:
-                result["verdict"] = "FAIR"
+            if edge > 5.0: result["verdict"] = "BUY_YES"
+            elif edge < -5.0: result["verdict"] = "BUY_NO"
+            else: result["verdict"] = "FAIR"
                 
         result["debate_mode"] = False
         return result
@@ -411,54 +341,35 @@ async def _multi_agent_debate(question: str, yes_price: float, web_context: str)
 
     judge_prompt = JUDGE_PROMPT.format(
         question=question,
-        yes_pct=yes_pct,
-        no_pct=no_pct,
         bull_case=bull_raw.get("bull_case", ""),
-        bull_facts=json.dumps(bull_raw.get("bull_facts", [])),
-        bull_prob=bull_prob,
-        bear_case=bear_raw.get("bear_case", ""),
-        bear_facts=json.dumps(bear_raw.get("bear_facts", [])),
-        bear_prob=bear_prob,
+        bear_case=bear_raw.get("bear_case", "")
     )
 
-    # Wait 2 seconds
     await asyncio.sleep(2)
-
-    # 3. Ask the Judge
+    
+    # 3. Ask Judge
     judge_raw = await _call_gemini_async(judge_prompt, max_tokens=4096)
-
     if "error" in judge_raw:
         return judge_raw
 
     # --- DETERMINISTIC PRICING MATH ---
-    
-    # 1. Establish the Anchor Price
     sb_prob = parse_odds_to_prob(judge_raw.get("extracted_sportsbook_odds"))
     
     if sb_prob is not None:
-        # De-vig assumption: remove ~5% juice from the raw implied probability
-        anchor_price = sb_prob * 0.95 
+        anchor_price = sb_prob * 0.95  # De-vig
         confidence = "high"
     else:
-        # Fallback to the Polymarket price if no hard odds are found
         anchor_price = yes_price
         confidence = "medium"
 
-    # 2. Apply qualitative shift based on LLM feature extraction
     bull_score = int(judge_raw.get("bull_score", 0))
     bear_score = int(judge_raw.get("bear_score", 0))
     
-    # Maximum allowed qualitative shift is strictly bounded to ±3% (0.03)
-    # A max diff of 5 (e.g. Bull 5, Bear 0) results in a full 0.03 shift.
     score_diff = bull_score - bear_score
     qualitative_shift = (score_diff / 5.0) * 0.03
-
     fair_value = anchor_price + qualitative_shift
-    
-    # Clamp fair value between 1% and 99%
     fair_value = max(0.01, min(0.99, fair_value))
     
-    # 3. Calculate Edge & Verdict in Python (Fixes the UI bug)
     edge_pct = fair_value - yes_price
     
     if edge_pct > 0.05:
@@ -472,13 +383,39 @@ async def _multi_agent_debate(question: str, yes_price: float, web_context: str)
         "fair_value":         float(fair_value),
         "confidence":         confidence,
         "verdict":            verdict,
-        "edge_pct":           float(edge_pct * 100), # Send to frontend as whole percentage cents
+        "edge_pct":           float(edge_pct * 100),
         "reasoning":          str(judge_raw.get("reasoning", "")),
         "key_facts":          list(judge_raw.get("key_facts", [])),
-        "sportsbook_implied": sb_prob, # Keep raw probability for the UI comparison
+        "sportsbook_implied": sb_prob,
         "debate_mode":        True,
         "bull_summary":       str(bull_raw.get("bull_case", "")[:200]),
         "bear_summary":       str(bear_raw.get("bear_case", "")[:200]),
         "bull_prob":          bull_prob,
         "bear_prob":          bear_prob,
     }
+
+# ── Public Endpoints ────────────────────────────────────────────────────────
+
+async def call_gemini(question: str, yes_price: float) -> dict:
+    """Full pipeline: Tavily search → multi-agent debate → structured verdict."""
+    web_context = _tavily_search(question)
+    try:
+        result = await _multi_agent_debate(question, yes_price, web_context)
+    except Exception as e:
+        result = {"error": f"Debate pipeline failed: {e}"}
+    return result
+
+async def analyze(cache_key: str, question: str, yes_price: float) -> tuple[dict, bool]:
+    """Returns (result_dict, from_cache). Checks cache first."""
+    if not cache_key:
+        cache_key = hashlib.md5(question.encode()).hexdigest()
+
+    cached = _cache_get(cache_key)
+    if cached:
+        return cached, True
+
+    result = await call_gemini(question, yes_price)
+    if "error" not in result:
+        _cache_set(cache_key, result)
+
+    return result, False
