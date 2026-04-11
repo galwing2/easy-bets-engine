@@ -498,43 +498,83 @@ async function openTrackRecord() {
       
       const preds = data.predictions || data;
 
-      // 1. UPDATE THIS LINE: What it says when there is no data yet
+      // If database is completely empty
       if (!preds || !preds.length) {
           list.innerHTML = "<p style='color:var(--muted);text-align:center;padding:2rem;'>Waiting to acquire data from closed markets...</p>";
           return;
       }
 
-      list.innerHTML = preds.map(p => {
-          const isCorrect = p.resolved && p.won;
-          let statusBadge = '<span style="color:var(--accent);font-weight:bold;">⏳ PENDING</span>';
-          if (p.resolved) {
-              statusBadge = isCorrect 
-                  ? '<span style="color:#00e676;font-weight:bold;">✅ WON</span>' 
-                  : '<span style="color:var(--danger);font-weight:bold;">❌ LOST</span>';
-          }
+      // Split predictions into Pending and Closed arrays
+      const pending = preds.filter(p => !p.resolved);
+      const closed  = preds.filter(p => p.resolved);
 
-          const verdictColor = p.ai_verdict === 'BUY_YES' ? '#00e676' : 'var(--danger)';
-          const verdictText  = p.ai_verdict.replace('_', ' ');
+      let html = '';
 
-          return `
-          <div style="background:var(--surface2);padding:1rem;border-radius:8px;border:1px solid var(--border);">
-            <div style="font-size:0.9rem;margin-bottom:0.5rem;font-weight:600;color:var(--text);">${p.question}</div>
-            <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;color:var(--muted);">
-              <div>
-                <strong style="color:${verdictColor};">${verdictText}</strong> at ${(p.entry_price * 100).toFixed(0)}¢
-                <span style="margin:0 5px;">|</span>
-                Fair Value: ${(p.fair_value * 100).toFixed(0)}¢
-              </div>
-              <div>${statusBadge}</div>
-            </div>
-          </div>`;
-      }).join('');
+      // --- SECTION 1: CLOSED MARKETS (The actual track record) ---
+      html += `<div style="margin-bottom:2rem;">
+                 <h4 style="margin:0 0 0.8rem 0;color:var(--text);border-bottom:1px solid var(--border);padding-bottom:0.4rem;">
+                   Closed Markets (${closed.length})
+                 </h4>`;
       
-  // 2. UPDATE THIS LINE: What it says if the fetch fails (no error message)
+      if (closed.length === 0) {
+          html += `<p style="color:var(--muted);font-size:0.85rem;padding:0.5rem 0;">Waiting for analyzed markets to close to build your track record...</p>`;
+      } else {
+          html += `<div style="display:flex;flex-direction:column;gap:0.8rem;">` + 
+                  closed.map(p => createTrackRecordCard(p)).join('') + 
+                  `</div>`;
+      }
+      html += `</div>`;
+
+      // --- SECTION 2: PENDING PREDICTIONS ---
+      html += `<div>
+                 <h4 style="margin:0 0 0.8rem 0;color:var(--text);border-bottom:1px solid var(--border);padding-bottom:0.4rem;">
+                   Pending Predictions (${pending.length})
+                 </h4>`;
+      
+      if (pending.length === 0) {
+          html += `<p style="color:var(--muted);font-size:0.85rem;padding:0.5rem 0;">No pending markets.</p>`;
+      } else {
+          html += `<div style="display:flex;flex-direction:column;gap:0.8rem;">` + 
+                  pending.map(p => createTrackRecordCard(p)).join('') + 
+                  `</div>`;
+      }
+      html += `</div>`;
+
+      list.innerHTML = html;
+      
   } catch (e) {
+      // Safe fallback if the fetch fails
       list.innerHTML = "<p style='color:var(--muted);text-align:center;padding:2rem;'>Waiting to acquire data from closed markets...</p>";
   }
 }
+
+// Helper function to build the cards cleanly
+function createTrackRecordCard(p) {
+  const isCorrect = p.resolved && p.won;
+  let statusBadge = '<span style="color:var(--accent);font-weight:bold;">⏳ PENDING</span>';
+  if (p.resolved) {
+      statusBadge = isCorrect 
+          ? '<span style="color:#00e676;font-weight:bold;">✅ WON</span>' 
+          : '<span style="color:var(--danger);font-weight:bold;">❌ LOST</span>';
+  }
+
+  const verdictColor = p.ai_verdict === 'BUY_YES' ? '#00e676' : 'var(--danger)';
+  const verdictText  = p.ai_verdict.replace('_', ' ');
+
+  return `
+  <div style="background:var(--surface2);padding:1rem;border-radius:8px;border:1px solid var(--border);">
+    <div style="font-size:0.9rem;margin-bottom:0.5rem;font-weight:600;color:var(--text);">${p.question}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;color:var(--muted);">
+      <div>
+        <strong style="color:${verdictColor};">${verdictText}</strong> at ${(p.entry_price * 100).toFixed(0)}¢
+        <span style="margin:0 5px;">|</span>
+        Fair Value: ${(p.fair_value * 100).toFixed(0)}¢
+      </div>
+      <div>${statusBadge}</div>
+    </div>
+  </div>`;
+}
+
 function closeTrackRecord() {
-    document.getElementById('track-record-modal').style.display = 'none';
+  document.getElementById('track-record-modal').style.display = 'none';
 }
