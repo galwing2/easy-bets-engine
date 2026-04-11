@@ -487,53 +487,54 @@ function renderAIPanel(panel, res, yesPrice, polyUrl, fromCache) {
 /* ── AI Track Record ─────────────────────────────────────── */
 
 async function openTrackRecord() {
-    document.getElementById('track-record-modal').style.display = 'flex';
-    const list = document.getElementById('track-record-list');
-    list.innerHTML = '<div class="loading-state"><div class="spinner"></div><div class="loading-text">Loading predictions...</div></div>';
+  document.getElementById('track-record-modal').style.display = 'flex';
+  const list = document.getElementById('track-record-list');
+  list.innerHTML = '<div class="loading-state"><div class="spinner"></div><div class="loading-text">Loading predictions...</div></div>';
 
-    try {
-        const res = await fetch('/api/predictions');
-        if (!res.ok) throw new Error('Failed to fetch data');
-        const data = await res.json();
-        
-        // Handle standard list or dictionary wrappers
-        const preds = data.predictions || data;
+  try {
+      const res = await fetch('/api/predictions');
+      if (!res.ok) throw new Error('Failed to fetch data');
+      const data = await res.json();
+      
+      const preds = data.predictions || data;
 
-        if (!preds || !preds.length) {
-            list.innerHTML = "<p style='color:var(--muted);text-align:center;'>No AI predictions recorded yet. Ask the AI to analyze some markets!</p>";
-            return;
-        }
+      // 1. UPDATE THIS LINE: What it says when there is no data yet
+      if (!preds || !preds.length) {
+          list.innerHTML = "<p style='color:var(--muted);text-align:center;padding:2rem;'>Waiting to acquire data from closed markets...</p>";
+          return;
+      }
 
-        list.innerHTML = preds.map(p => {
-            const isCorrect = p.resolved && p.won;
-            let statusBadge = '<span style="color:var(--accent);font-weight:bold;">⏳ PENDING</span>';
-            if (p.resolved) {
-                statusBadge = isCorrect 
-                    ? '<span style="color:#00e676;font-weight:bold;">✅ WON</span>' 
-                    : '<span style="color:var(--danger);font-weight:bold;">❌ LOST</span>';
-            }
+      list.innerHTML = preds.map(p => {
+          const isCorrect = p.resolved && p.won;
+          let statusBadge = '<span style="color:var(--accent);font-weight:bold;">⏳ PENDING</span>';
+          if (p.resolved) {
+              statusBadge = isCorrect 
+                  ? '<span style="color:#00e676;font-weight:bold;">✅ WON</span>' 
+                  : '<span style="color:var(--danger);font-weight:bold;">❌ LOST</span>';
+          }
 
-            const verdictColor = p.ai_verdict === 'BUY_YES' ? '#00e676' : 'var(--danger)';
-            const verdictText  = p.ai_verdict.replace('_', ' ');
+          const verdictColor = p.ai_verdict === 'BUY_YES' ? '#00e676' : 'var(--danger)';
+          const verdictText  = p.ai_verdict.replace('_', ' ');
 
-            return `
-            <div style="background:var(--surface2);padding:1rem;border-radius:8px;border:1px solid var(--border);">
-              <div style="font-size:0.9rem;margin-bottom:0.5rem;font-weight:600;color:var(--text);">${p.question}</div>
-              <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;color:var(--muted);">
-                <div>
-                  <strong style="color:${verdictColor};">${verdictText}</strong> at ${(p.entry_price * 100).toFixed(0)}¢
-                  <span style="margin:0 5px;">|</span>
-                  Fair Value: ${(p.fair_value * 100).toFixed(0)}¢
-                </div>
-                <div>${statusBadge}</div>
+          return `
+          <div style="background:var(--surface2);padding:1rem;border-radius:8px;border:1px solid var(--border);">
+            <div style="font-size:0.9rem;margin-bottom:0.5rem;font-weight:600;color:var(--text);">${p.question}</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;color:var(--muted);">
+              <div>
+                <strong style="color:${verdictColor};">${verdictText}</strong> at ${(p.entry_price * 100).toFixed(0)}¢
+                <span style="margin:0 5px;">|</span>
+                Fair Value: ${(p.fair_value * 100).toFixed(0)}¢
               </div>
-            </div>`;
-        }).join('');
-    } catch (e) {
-        list.innerHTML = `<p style='color:var(--danger);text-align:center;'>Failed to load track record: ${e.message}</p>`;
-    }
+              <div>${statusBadge}</div>
+            </div>
+          </div>`;
+      }).join('');
+      
+  // 2. UPDATE THIS LINE: What it says if the fetch fails (no error message)
+  } catch (e) {
+      list.innerHTML = "<p style='color:var(--muted);text-align:center;padding:2rem;'>Waiting to acquire data from closed markets...</p>";
+  }
 }
-
 function closeTrackRecord() {
     document.getElementById('track-record-modal').style.display = 'none';
 }
