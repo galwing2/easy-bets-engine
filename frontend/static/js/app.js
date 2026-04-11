@@ -492,7 +492,7 @@ async function openTrackRecord() {
   list.innerHTML = '<div class="loading-state"><div class="spinner"></div><div class="loading-text">Loading predictions...</div></div>';
 
   try {
-      const res = await fetch('/api/predictions');
+      const res = await fetch('/api/routes/predictions');
       if (!res.ok) throw new Error('Failed to fetch data');
       const data = await res.json();
       

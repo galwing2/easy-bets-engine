@@ -309,30 +309,38 @@ async def call_gemini(question: str, yes_price: float) -> dict:
     return result
 
 async def analyze(cache_key: str, question: str, yes_price: float) -> tuple[dict, bool]:
+    """Returns (result_dict, from_cache). Checks cache first, but always logs to predictions."""
     if not cache_key:
         cache_key = hashlib.md5(question.encode()).hexdigest()
 
+    result = None
+    from_cache = False
+
+    # 1. Check the cache
     cached = _cache_get(cache_key)
-    if cached: return cached, True
+    if cached:
+        result = cached
+        from_cache = True
+    else:
+        # 2. Run fresh LLM analysis if not cached
+        result = await call_gemini(question, yes_price)
+        if "error" not in result:
+            _cache_set(cache_key, result)
 
-    result = await call_gemini(question, yes_price)
-    
-    if "error" not in result:
-        _cache_set(cache_key, result)
-        
-        # --- THE RESTORED PREDICTIONS LOGGING ---
-        if result.get("verdict") in ["BUY_YES", "BUY_NO"]:
-            db = get_db()
-            if not db["predictions"].find_one({"cache_key": cache_key}):
-                db["predictions"].insert_one({
-                    "cache_key": cache_key,
-                    "question": question,
-                    "ai_verdict": result["verdict"],
-                    "entry_price": yes_price,
-                    "fair_value": result["fair_value"],
-                    "edge_pct": result["edge_pct"],
-                    "resolved": False,
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                })
+    # 3. THE FIX: Always log to Track Record, even if loaded from cache!
+    if "error" not in result and result.get("verdict") in ["BUY_YES", "BUY_NO"]:
+        db = get_db()
+        # Only insert if it doesn't already exist in the track record
+        if not db["predictions"].find_one({"cache_key": cache_key}):
+            db["predictions"].insert_one({
+                "cache_key": cache_key,
+                "question": question,
+                "ai_verdict": result["verdict"],
+                "entry_price": yes_price,
+                "fair_value": result["fair_value"],
+                "edge_pct": result["edge_pct"],
+                "resolved": False,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
 
-    return result, False
+    return result, from_cache
