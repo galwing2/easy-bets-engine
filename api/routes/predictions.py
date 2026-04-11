@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter
 from api.db import get_db
 
-router = APIRouter(prefix="/api/predictions", tags=["predictions"])
+router = APIRouter(prefix="/api/routes/predictions", tags=["predictions"])
 
 
 @router.post("/save")
