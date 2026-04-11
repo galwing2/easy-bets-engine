@@ -1,17 +1,12 @@
 """
-alert_worker.py
----------------------
-Background worker that runs continuously, checks Polymarket for live prices,
-and sends an email to the user when their price alert target is reached.
+alert_worker.py — EasyBets background price alert worker.
 
-Run standalone: python alert_worker.py
+Run standalone:  python alert_worker.py
 
 Trigger logic:
-  Uses the `target_direction` field saved with each alert:
-    "below" → fires when live price drops TO or BELOW target  (buy the dip)
-    "above" → fires when live price rises TO or ABOVE target  (momentum entry)
-
-  Old alerts without `target_direction` default to "below".
+  target_direction "below" -> fire when live price <= target  (buy the dip)
+  target_direction "above" -> fire when live price >= target  (momentum entry)
+  Old alerts without target_direction default to "below".
 """
 
 import time
@@ -27,67 +22,77 @@ load_dotenv()
 
 from api.db import get_db
 
-# Constants
-GAMMA_SINGLE = "https://gamma-api.polymarket.com/markets?slug={slug}"
-CHECK_DELAY  = 0.5   # seconds between API calls per slug
-LOOP_DELAY   = 300   # seconds between full scans (5 minutes)
-
+GAMMA_SINGLE       = "https://gamma-api.polymarket.com/markets?slug={slug}" 
+CHECK_DELAY        = 0.5 # Minimum delay between API calls to avoid rate limits (in seconds)
+LOOP_DELAY         = 120  # Minimum delay between alert checks to avoid hammering the API (in seconds)
 SENDER_EMAIL       = os.getenv("SENDER_EMAIL")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 
 
-def send_alert_email(to_email: str, question: str, target_side: str,
-                     target_price: float, target_direction: str,
-                     live_price: float, slug: str):
-    """Sends an HTML email notifying the user their alert triggered."""
+def send_alert_email(to_email, question, target_side, target_price, target_direction, live_price, slug):
     if not SENDER_EMAIL or not GMAIL_APP_PASSWORD:
-        print("⚠️  Warning: Gmail credentials missing. Cannot send email.")
+        print("  Warning: Gmail credentials missing.")
         return
 
-    poly_url     = f"https://polymarket.com/event/{slug}"
-    dir_symbol   = "↓ dropped to" if target_direction == "below" else "↑ rose to"
-    subject      = f"🔔 EasyBets Alert: {target_side} {dir_symbol} {(target_price * 100):.0f}¢!"
+    poly_url  = "https://polymarket.com/event/{}".format(slug)
+    dir_label = "dropped to or below" if target_direction == "below" else "risen to or above"
+    subject   = "EasyBets Alert: {} has {} {:.0f}c".format(target_side, dir_label, target_price * 100)
 
-    html_content = f"""
-    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;
-                border: 1px solid #e0e0e0; border-radius: 10px;">
-        <h2 style="color: #00e676; margin-top: 0;">⚡ EasyBets Alert Triggered</h2>
-        <p style="font-size: 16px; color: #333;">Your target price has been reached on Polymarket!</p>
+    # Note if price moved further past the target during the 5-min polling window
+    past_target = (
+        (target_direction == "below" and live_price < target_price) or
+        (target_direction == "above" and live_price > target_price)
+    )
+    live_note = " (moved further to {:.0f}c in the last 5 min)".format(live_price * 100) if past_target else ""
 
-        <div style="background-color: #f5f5f5; padding: 15px; border-radius: 8px; margin: 20px 0;">
-            <p style="margin: 0 0 10px 0; font-weight: bold; color: #111;">{question}</p>
-            <p style="margin: 0; color: #555;">
-                Target: <strong>{target_side} {dir_symbol} {(target_price * 100):.0f}¢</strong>
-            </p>
-            <p style="margin: 5px 0 0 0; color: #555;">
-                Current Live Price: <strong style="color: #00e676;">{(live_price * 100):.0f}¢</strong>
-            </p>
-        </div>
-
-        <a href="{poly_url}" style="display: inline-block; background-color: #000; color: #fff;
-           text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold;">
-            View on Polymarket &rarr;
-        </a>
-
-        <p style="margin-top: 30px; font-size: 12px; color: #999;">
-            This alert has now been removed from your account, freeing up your quota.
+    html = """
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;
+                border:1px solid #e0e0e0;border-radius:10px;">
+      <h2 style="color:#00e676;margin-top:0;">EasyBets Alert Triggered</h2>
+      <p style="font-size:16px;color:#333;">Your price alert has been reached on Polymarket!</p>
+      <div style="background:#f5f5f5;padding:15px;border-radius:8px;margin:20px 0;">
+        <p style="margin:0 0 10px 0;font-weight:bold;color:#111;">{question}</p>
+        <p style="margin:0;color:#555;">
+          Your alert: <strong>{side} {dir_label} {target_c:.0f}c</strong>
         </p>
+        <p style="margin:5px 0 0 0;color:#555;">
+          Price when checked: <strong style="color:#00e676;">{live_c:.0f}c</strong>{live_note}
+        </p>
+        <p style="margin:8px 0 0 0;font-size:12px;color:#999;">
+          Alerts are checked every 5 minutes so the live price may differ slightly from your exact target.
+        </p>
+      </div>
+      <a href="{poly_url}" style="display:inline-block;background:#000;color:#fff;
+         text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;">
+        View on Polymarket
+      </a>
+      <p style="margin-top:30px;font-size:12px;color:#999;">
+        This alert has been removed from your account.
+      </p>
     </div>
-    """
+    """.format(
+        question=question,
+        side=target_side,
+        dir_label=dir_label,
+        target_c=target_price * 100,
+        live_c=live_price * 100,
+        live_note=live_note,
+        poly_url=poly_url,
+    )
 
     msg = EmailMessage()
-    msg['Subject'] = subject
-    msg['From']    = f"EasyBets Alerts <{SENDER_EMAIL}>"
-    msg['To']      = to_email
-    msg.add_alternative(html_content, subtype='html')
+    msg["Subject"] = subject
+    msg["From"]    = "EasyBets Alerts <{}>".format(SENDER_EMAIL)
+    msg["To"]      = to_email
+    msg.add_alternative(html, subtype="html")
 
     try:
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
             smtp.login(SENDER_EMAIL, GMAIL_APP_PASSWORD)
             smtp.send_message(msg)
-        print(f"  ✉️  Email sent successfully to {to_email}")
+        print("  Email sent to {}".format(to_email))
     except Exception as e:
-        print(f"  ⚠️  Failed to send email to {to_email}: {e}")
+        print("  Failed to send email to {}: {}".format(to_email, e))
 
 
 def check_alerts():
@@ -95,12 +100,11 @@ def check_alerts():
     active_alerts = list(db["alerts"].find({"fired": False}))
 
     if not active_alerts:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] No active alerts to check.")
+        print("[{}] No active alerts.".format(datetime.now().strftime("%H:%M:%S")))
         return
 
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking {len(active_alerts)} active alerts...")
+    print("[{}] Checking {} alerts...".format(datetime.now().strftime("%H:%M:%S"), len(active_alerts)))
 
-    # Group by slug — one API call per market
     alerts_by_slug = {}
     for alert in active_alerts:
         slug = alert.get("market_slug")
@@ -122,7 +126,6 @@ def check_alerts():
             market   = market_data[0] if isinstance(market_data, list) else market_data
             outcomes = market.get("outcomes", "[]")
             prices   = market.get("outcomePrices", "[]")
-
             if isinstance(outcomes, str): outcomes = json.loads(outcomes)
             if isinstance(prices,   str): prices   = json.loads(prices)
 
@@ -131,30 +134,26 @@ def check_alerts():
                 continue
 
             yes_idx  = outcomes.index("Yes")
-            no_idx   = 1 - yes_idx
             live_yes = float(prices[yes_idx])
-            live_no  = float(prices[no_idx])
+            live_no  = float(prices[1 - yes_idx])
 
             for alert in alerts:
                 target_side      = alert["target_side"].upper()
                 target_price     = float(alert["target_price"])
-                # Default "below" so old alerts without the field still work
                 target_direction = alert.get("target_direction", "below")
 
                 live_price = live_yes if target_side == "YES" else live_no
 
-                if target_direction == "below":
-                    triggered = live_price <= target_price
-                else:  # "above"
-                    triggered = live_price >= target_price
+                triggered = (
+                    live_price <= target_price if target_direction == "below"
+                    else live_price >= target_price
+                )
 
                 if triggered:
-                    dir_label = "↓" if target_direction == "below" else "↑"
-                    print(
-                        f"  🚨 TRIGGERED: {alert['user_email']} | "
-                        f"{target_side} {dir_label} {target_price*100:.0f}¢ "
-                        f"(Live: {live_price*100:.0f}¢)"
-                    )
+                    print("  TRIGGERED: {} | {} {} {:.0f}c (live: {:.0f}c)".format(
+                        alert["user_email"], target_side, target_direction,
+                        target_price * 100, live_price * 100
+                    ))
                     send_alert_email(
                         to_email=alert["user_email"],
                         question=alert["question"],
@@ -167,7 +166,7 @@ def check_alerts():
                     db["alerts"].delete_one({"_id": alert["_id"]})
 
         except Exception as e:
-            print(f"  ⚠️  Error checking slug {slug}: {e}")
+            print("  Error checking {}: {}".format(slug, e))
 
         time.sleep(CHECK_DELAY)
 

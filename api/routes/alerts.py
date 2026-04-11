@@ -22,7 +22,6 @@ def create_alert(body: AlertCreateRequest):
     if active_count >= MAX_ALERTS_PER_USER:
         raise HTTPException(400, f"Limit reached. You can only have {MAX_ALERTS_PER_USER} active alerts.")
 
-    # Sanitise direction — fall back to "below" if anything unexpected arrives
     direction = body.target_direction if body.target_direction in ("above", "below") else "below"
 
     alert = {

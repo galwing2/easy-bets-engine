@@ -16,25 +16,19 @@
     <div class="grid-bg"></div>
     <div class="glow-orb green"></div>
     <div class="glow-orb blue"></div>
-    
     <div class="landing-content">
-      <div class="logo-badge">⚡ EASYBETS</div>
+      <div class="logo-badge">EASYBETS</div>
       <h1 class="landing-title">Find Edge. <span>Set Alerts.</span></h1>
       <p class="landing-sub">AI-powered sports market analysis.<br>Sign up to watch odds automatically.</p>
-      
-      <div class="auth-box" style="display:flex; flex-direction:column; gap:1rem; align-items:center; margin-bottom: 2rem;">
-        <input type="email" id="auth-email" placeholder="name@email.com" class="chat-input" style="width: 100%; max-width: 280px;">
-        
-        <div style="display:flex; gap:0.8rem; width:100%; max-width: 280px;">
-          <button class="cta-btn" onclick="handleAuth('in')" id="signin-btn" style="flex:1; justify-content:center; background:var(--surface2); color:var(--text); border:1px solid var(--border);">Sign In</button>
-          <button class="cta-btn" onclick="handleAuth('up')" id="signup-btn" style="flex:1; justify-content:center;">Sign Up</button>
+      <div class="auth-box" style="display:flex;flex-direction:column;gap:1rem;align-items:center;margin-bottom:2rem;">
+        <input type="email" id="auth-email" placeholder="name@email.com" class="chat-input" style="width:100%;max-width:280px;">
+        <div style="display:flex;gap:0.8rem;width:100%;max-width:280px;">
+          <button class="cta-btn" onclick="handleAuth('in')" id="signin-btn" style="flex:1;justify-content:center;background:var(--surface2);color:var(--text);border:1px solid var(--border);">Sign In</button>
+          <button class="cta-btn" onclick="handleAuth('up')" id="signup-btn" style="flex:1;justify-content:center;">Sign Up</button>
         </div>
-        <div id="auth-msg" style="font-size: 0.9rem; font-weight: 600;"></div>
-        
-        <!-- Guest Button -->
-        <button class="action-btn poly-btn" onclick="enterAsGuest()" style="margin-top: 0.5rem; font-size:0.85rem; border:none;">Continue as Guest &rarr;</button>
+        <div id="auth-msg" style="font-size:0.9rem;font-weight:600;"></div>
+        <button class="action-btn poly-btn" onclick="enterAsGuest()" style="margin-top:0.5rem;font-size:0.85rem;border:none;">Continue as Guest &rarr;</button>
       </div>
-
       <div class="landing-stats">
         <div class="stat"><span class="stat-val" id="live-count">--</span><span class="stat-label">Live Markets</span></div>
         <div class="stat"><span class="stat-val">24/7</span><span class="stat-label">AI Analysis</span></div>
@@ -45,28 +39,22 @@
   <!-- Markets Screen -->
   <div id="screen-markets" class="screen">
     <div class="markets-header">
-      <div class="markets-logo">⚡ EASY<span>BETS</span></div>
-      
-      <div style="margin-left:auto; display:flex; align-items:center; gap:1rem;">
+      <div class="markets-logo">EASY<span>BETS</span></div>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:1rem;">
         <button class="action-btn poly-btn" onclick="document.getElementById('about-modal').style.display='flex'">About</button>
-        
-        <!-- Alerts Hub Button (Hidden for Guests) -->
         <button id="header-alerts-btn" class="action-btn ai-btn" onclick="openManageAlerts()">My Alerts (<span id="alert-usage">0</span>/5)</button>
-        
         <div class="profile-pill" style="cursor:default;">
           <div class="profile-dot"></div>
           <span id="user-display"></span>
-          <button id="auth-action-btn" onclick="toggleAuth()" style="background:none; border:none; color:var(--danger); font-family:var(--mono); font-size:0.75rem; cursor:pointer; margin-left:0.5rem;">[Sign Out]</button>
+          <button id="auth-action-btn" onclick="toggleAuth()" style="background:none;border:none;color:var(--danger);font-family:var(--mono);font-size:0.75rem;cursor:pointer;margin-left:0.5rem;">[Sign Out]</button>
         </div>
       </div>
     </div>
-    
     <div class="markets-body">
       <div class="section-header">
         <h2 class="section-title">Sports Markets</h2>
         <span class="section-count" id="market-count">--</span>
       </div>
-      
       <div class="filter-panel">
         <div class="filter-panel-title">Sport</div>
         <div class="filter-row" id="sport-filters"></div>
@@ -77,65 +65,69 @@
           <button class="subfilter-chip" onclick="setEdgeFilter('no', this)">Bearish (NO)</button>
         </div>
       </div>
-      
       <div id="markets-list"></div>
     </div>
   </div>
 
   <!-- Create Alert Modal -->
-  <div id="alert-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; align-items:center; justify-content:center;">
-    <div style="background:var(--surface); border:1px solid var(--border); padding:2rem; border-radius:12px; max-width:400px; width:100%; margin: 1rem;">
-        <h3 style="margin-bottom:1rem;">Set Price Alert</h3>
-        <p id="alert-q" style="font-size:0.9rem; color:var(--text); margin-bottom:1.5rem; line-height: 1.4;"></p>
-        
-        <label style="font-size:0.8rem; color:var(--muted); display:block; margin-bottom:0.3rem;">Target Outcome</label>
-        <select id="alert-side" class="chat-input" style="width:100%; margin-bottom:1rem;">
-            <option value="YES">YES</option>
-            <option value="NO">NO</option>
-        </select>
+  <div id="alert-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:var(--surface);border:1px solid var(--border);padding:2rem;border-radius:12px;max-width:400px;width:100%;margin:1rem;">
+      <h3 style="margin-bottom:1rem;">Set Price Alert</h3>
+      <p id="alert-q" style="font-size:0.9rem;color:var(--text);margin-bottom:1.5rem;line-height:1.4;"></p>
 
-        <label style="font-size:0.8rem; color:var(--muted); display:block; margin-bottom:0.3rem;">Alert Direction</label>
-        <select id="alert-direction" class="chat-input" style="width:100%; margin-bottom:0.5rem;">
-            <option value="below">Drops to or below my price (buy the dip)</option>
-            <option value="above">Rises to or above my price (momentum)</option>
-        </select>
-        <p id="alert-direction-hint" style="font-size:0.75rem; color:var(--muted); margin-bottom:1rem;"></p>
+      <label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:0.3rem;">Outcome</label>
+      <select id="alert-side" class="chat-input" style="width:100%;margin-bottom:1rem;" onchange="updateDirectionHint()">
+        <option value="YES">YES</option>
+        <option value="NO">NO</option>
+      </select>
 
-        <label style="font-size:0.8rem; color:var(--muted); display:block; margin-bottom:0.3rem;">Target Price (¢)</label>
-        <input type="number" id="alert-price" class="chat-input" style="width:100%; margin-bottom:1.5rem;" min="1" max="99" value="50">
-        
-        <div id="alert-error" style="color:var(--danger); font-size:0.85rem; margin-bottom:1rem; font-weight: 600;"></div>
-        
-        <div style="display:flex; gap:0.8rem;">
-            <button class="cta-btn" onclick="saveAlert()" style="flex:1; justify-content:center; padding: 0.7rem;">Save</button>
-            <button class="action-btn poly-btn" onclick="closeAlertModal()" style="flex:1; padding: 0.7rem;">Cancel</button>
-        </div>
+      <label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:0.3rem;">Alert Direction</label>
+      <select id="alert-direction" class="chat-input" style="width:100%;margin-bottom:0.5rem;" onchange="updateDirectionHint()">
+        <option value="above">Rises to or above my price (momentum)</option>
+        <option value="below">Drops to or below my price (buy the dip)</option>
+      </select>
+      <p id="alert-direction-hint" style="font-size:0.75rem;color:var(--accent2);margin-bottom:1rem;min-height:1rem;"></p>
+
+      <label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:0.3rem;">Target Price (cents)</label>
+      <input type="number" id="alert-price" class="chat-input" style="width:100%;margin-bottom:1.5rem;" min="1" max="99" value="50" oninput="updateDirectionHint()">
+
+      <div id="alert-error" style="color:var(--danger);font-size:0.85rem;margin-bottom:1rem;font-weight:600;"></div>
+
+      <div style="display:flex;gap:0.8rem;">
+        <button class="cta-btn" onclick="saveAlert()" style="flex:1;justify-content:center;padding:0.7rem;">Save Alert</button>
+        <button class="action-btn poly-btn" onclick="closeAlertModal()" style="flex:1;padding:0.7rem;">Cancel</button>
+      </div>
     </div>
   </div>
 
-  <!-- Manage Alerts Hub Modal -->
-  <div id="manage-alerts-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; align-items:center; justify-content:center;">
-    <div style="background:var(--surface); border:1px solid var(--border); padding:2rem; border-radius:12px; max-width:500px; width:100%; margin: 1rem; max-height:80vh; display:flex; flex-direction:column;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
-            <h3>My Active Alerts</h3>
-            <button onclick="document.getElementById('manage-alerts-modal').style.display='none'" style="background:none; border:none; color:var(--muted); font-size:1.5rem; cursor:pointer;">&times;</button>
-        </div>
-        <div id="manage-alerts-list" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:0.8rem;"></div>
+  <!-- Manage Alerts Modal -->
+  <div id="manage-alerts-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:var(--surface);border:1px solid var(--border);padding:2rem;border-radius:12px;max-width:500px;width:100%;margin:1rem;max-height:80vh;display:flex;flex-direction:column;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;">
+        <h3>My Active Alerts</h3>
+        <button onclick="document.getElementById('manage-alerts-modal').style.display='none'" style="background:none;border:none;color:var(--muted);font-size:1.5rem;cursor:pointer;">&times;</button>
+      </div>
+      <div id="manage-alerts-list" style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:0.8rem;"></div>
     </div>
   </div>
 
   <!-- About Modal -->
-  <div id="about-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; align-items:center; justify-content:center;">
-    <div style="background:var(--surface); border:1px solid var(--border); padding:2rem; border-radius:12px; max-width:450px; width:100%; margin: 1rem; line-height:1.6;">
-        <h3 style="margin-bottom:1rem;">How EasyBets Works</h3>
-        <p style="font-size:0.9rem; color:var(--text); margin-bottom:1rem;">EasyBets monitors the Polymarket orderbook and compares it against an AI-driven Fair Value model to find mathematically profitable edges.</p>
-        <h4 style="margin-bottom:0.5rem; color:var(--accent);">Alert Limits & Rules</h4>
-        <ul style="font-size:0.85rem; color:var(--muted); margin-left:1.5rem; margin-bottom:1.5rem;">
-            <li style="margin-bottom:0.3rem;">Users are limited to a maximum of <strong>5 active alerts</strong> at a time.</li>
-            <li style="margin-bottom:0.3rem;">Alerts trigger automatically when the live price reaches your target odds.</li>
-            <li>Once an alert triggers, it is deleted automatically.</li>
-        </ul>
-        <button class="cta-btn" onclick="document.getElementById('about-modal').style.display='none'" style="width:100%; justify-content:center; padding:0.8rem;">Got It</button>
+  <div id="about-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:var(--surface);border:1px solid var(--border);padding:2rem;border-radius:12px;max-width:450px;width:100%;margin:1rem;line-height:1.6;">
+      <h3 style="margin-bottom:1rem;">How EasyBets Works</h3>
+      <p style="font-size:0.9rem;color:var(--text);margin-bottom:1rem;">EasyBets monitors the Polymarket orderbook and compares it against an AI-driven Fair Value model to find mathematically profitable edges.</p>
+      <h4 style="margin-bottom:0.5rem;color:var(--accent);">Alert Directions</h4>
+      <ul style="font-size:0.85rem;color:var(--muted);margin-left:1.5rem;margin-bottom:1rem;">
+        <li style="margin-bottom:0.3rem;"><strong>Rises above</strong> — fires when the price climbs to your target or higher.</li>
+        <li><strong>Drops below</strong> — fires when the price falls to your target or lower.</li>
+      </ul>
+      <h4 style="margin-bottom:0.5rem;color:var(--accent);">Alert Limits</h4>
+      <ul style="font-size:0.85rem;color:var(--muted);margin-left:1.5rem;margin-bottom:1.5rem;">
+        <li style="margin-bottom:0.3rem;">Maximum of <strong>5 active alerts</strong> per account.</li>
+        <li style="margin-bottom:0.3rem;">Alerts are checked every 5 minutes.</li>
+        <li>Once triggered, an alert is automatically removed.</li>
+      </ul>
+      <button class="cta-btn" onclick="document.getElementById('about-modal').style.display='none'" style="width:100%;justify-content:center;padding:0.8rem;">Got It</button>
     </div>
   </div>
 
