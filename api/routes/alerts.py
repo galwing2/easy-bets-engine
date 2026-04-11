@@ -22,8 +22,8 @@ def create_alert(body: AlertCreateRequest):
     if active_count >= MAX_ALERTS_PER_USER:
         raise HTTPException(400, f"Limit reached. You can only have {MAX_ALERTS_PER_USER} active alerts.")
 
-    if body.target_direction not in ("above", "below"):
-        raise HTTPException(400, "target_direction must be 'above' or 'below'.")
+    # Sanitise direction — fall back to "below" if anything unexpected arrives
+    direction = body.target_direction if body.target_direction in ("above", "below") else "below"
 
     alert = {
         "user_email":       body.user_email,
@@ -31,7 +31,7 @@ def create_alert(body: AlertCreateRequest):
         "question":         body.question,
         "target_price":     body.target_price,
         "target_side":      body.target_side,
-        "target_direction": body.target_direction,  # "above" | "below"
+        "target_direction": direction,
         "fired":            False,
         "created_at":       datetime.now(timezone.utc).isoformat()
     }

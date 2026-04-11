@@ -25,4 +25,4 @@ class AlertCreateRequest(BaseModel):
     question: str
     target_price: float
     target_side: str
-    target_direction: str  # "above" or "below"
+    target_direction: str = "below"  # "above" or "below" — defaults to below
