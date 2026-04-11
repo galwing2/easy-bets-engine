@@ -9,30 +9,33 @@ router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 @router.get("/{email}")
 def get_alerts(email: str):
-    # Fetch alerts and convert the MongoDB _id to a string
     alerts = list(get_db()["alerts"].find({"user_email": email, "fired": False}))
     for a in alerts:
-        a["_id"] = str(a["_id"]) 
+        a["_id"] = str(a["_id"])
     return {"alerts": alerts}
 
 @router.post("/")
 def create_alert(body: AlertCreateRequest):
     db = get_db()
-    
+
     active_count = db["alerts"].count_documents({"user_email": body.user_email, "fired": False})
     if active_count >= MAX_ALERTS_PER_USER:
         raise HTTPException(400, f"Limit reached. You can only have {MAX_ALERTS_PER_USER} active alerts.")
-        
+
+    if body.target_direction not in ("above", "below"):
+        raise HTTPException(400, "target_direction must be 'above' or 'below'.")
+
     alert = {
-        "user_email": body.user_email,
-        "market_slug": body.market_slug,
-        "question": body.question,
-        "target_price": body.target_price,
-        "target_side": body.target_side,
-        "fired": False,
-        "created_at": datetime.now(timezone.utc).isoformat()
+        "user_email":       body.user_email,
+        "market_slug":      body.market_slug,
+        "question":         body.question,
+        "target_price":     body.target_price,
+        "target_side":      body.target_side,
+        "target_direction": body.target_direction,  # "above" | "below"
+        "fired":            False,
+        "created_at":       datetime.now(timezone.utc).isoformat()
     }
-    
+
     db["alerts"].insert_one(alert)
     return {"message": "Alert created successfully"}
 

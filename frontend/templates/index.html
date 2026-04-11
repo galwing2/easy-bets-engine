@@ -31,6 +31,7 @@
         </div>
         <div id="auth-msg" style="font-size: 0.9rem; font-weight: 600;"></div>
         
+        <!-- Guest Button -->
         <button class="action-btn poly-btn" onclick="enterAsGuest()" style="margin-top: 0.5rem; font-size:0.85rem; border:none;">Continue as Guest &rarr;</button>
       </div>
 
@@ -46,9 +47,10 @@
     <div class="markets-header">
       <div class="markets-logo">⚡ EASY<span>BETS</span></div>
       
-      <div style="margin-left:auto; display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
-        <button class="action-btn poly-btn" onclick="showScreen('screen-performance'); loadPerformance();">📊 AI Track Record</button>
+      <div style="margin-left:auto; display:flex; align-items:center; gap:1rem;">
         <button class="action-btn poly-btn" onclick="document.getElementById('about-modal').style.display='flex'">About</button>
+        
+        <!-- Alerts Hub Button (Hidden for Guests) -->
         <button id="header-alerts-btn" class="action-btn ai-btn" onclick="openManageAlerts()">My Alerts (<span id="alert-usage">0</span>/5)</button>
         
         <div class="profile-pill" style="cursor:default;">
@@ -80,39 +82,6 @@
     </div>
   </div>
 
-  <!-- ═══════════════════════════════════════════════════════════
-       PERFORMANCE DASHBOARD (Feature 1: Track Record)
-       ═══════════════════════════════════════════════════════════ -->
-  <div id="screen-performance" class="screen" style="flex-direction:column;">
-    <div class="markets-header">
-      <button class="action-btn poly-btn" onclick="showScreen('screen-markets')" style="font-size:1.1rem; padding: 0.4rem 0.8rem;">←</button>
-      <div class="markets-logo" style="margin-left:0.5rem;">📊 AI TRACK RECORD</div>
-    </div>
-
-    <div class="markets-body">
-      <!-- Summary KPI Cards -->
-      <div id="perf-kpis" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:1rem; margin-bottom:2rem;">
-        <div class="kpi-card" id="kpi-winrate"><div class="kpi-val">--</div><div class="kpi-label">Win Rate</div></div>
-        <div class="kpi-card" id="kpi-roi"><div class="kpi-val">--</div><div class="kpi-label">Avg ROI / Bet</div></div>
-        <div class="kpi-card" id="kpi-resolved"><div class="kpi-val">--</div><div class="kpi-label">Resolved Calls</div></div>
-        <div class="kpi-card" id="kpi-pending"><div class="kpi-val">--</div><div class="kpi-label">Pending</div></div>
-      </div>
-
-      <!-- Win-rate chart (pure SVG/canvas via JS) -->
-      <div class="filter-panel" style="margin-bottom:1.5rem;">
-        <div class="filter-panel-title">Cumulative Win Rate — Last 50 Resolved Calls</div>
-        <canvas id="perf-chart" height="180" style="width:100%;"></canvas>
-      </div>
-
-      <!-- Recent predictions table -->
-      <div class="section-header">
-        <h2 class="section-title">Recent AI Calls</h2>
-        <span class="section-count" id="perf-total-badge">--</span>
-      </div>
-      <div id="perf-list"></div>
-    </div>
-  </div>
-
   <!-- Create Alert Modal -->
   <div id="alert-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; align-items:center; justify-content:center;">
     <div style="background:var(--surface); border:1px solid var(--border); padding:2rem; border-radius:12px; max-width:400px; width:100%; margin: 1rem;">
@@ -124,7 +93,14 @@
             <option value="YES">YES</option>
             <option value="NO">NO</option>
         </select>
-        
+
+        <label style="font-size:0.8rem; color:var(--muted); display:block; margin-bottom:0.3rem;">Alert Direction</label>
+        <select id="alert-direction" class="chat-input" style="width:100%; margin-bottom:0.5rem;">
+            <option value="below">Drops to or below my price (buy the dip)</option>
+            <option value="above">Rises to or above my price (momentum)</option>
+        </select>
+        <p id="alert-direction-hint" style="font-size:0.75rem; color:var(--muted); margin-bottom:1rem;"></p>
+
         <label style="font-size:0.8rem; color:var(--muted); display:block; margin-bottom:0.3rem;">Target Price (¢)</label>
         <input type="number" id="alert-price" class="chat-input" style="width:100%; margin-bottom:1.5rem;" min="1" max="99" value="50">
         
@@ -152,9 +128,7 @@
   <div id="about-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; align-items:center; justify-content:center;">
     <div style="background:var(--surface); border:1px solid var(--border); padding:2rem; border-radius:12px; max-width:450px; width:100%; margin: 1rem; line-height:1.6;">
         <h3 style="margin-bottom:1rem;">How EasyBets Works</h3>
-        <p style="font-size:0.9rem; color:var(--text); margin-bottom:1rem;">EasyBets monitors the Polymarket orderbook and compares it against a multi-agent AI Fair Value model to find mathematically profitable edges.</p>
-        <h4 style="margin-bottom:0.5rem; color:var(--accent);">Multi-Agent AI Debate</h4>
-        <p style="font-size:0.85rem; color:var(--muted); margin-bottom:1rem;">Each analysis runs three AI agents in parallel: a <strong style="color:var(--accent)">Bull</strong> (case for YES), a <strong style="color:var(--danger)">Bear</strong> (case for NO), and a <strong style="color:var(--accent2)">Judge</strong> who weighs both sides. This eliminates confirmation bias.</p>
+        <p style="font-size:0.9rem; color:var(--text); margin-bottom:1rem;">EasyBets monitors the Polymarket orderbook and compares it against an AI-driven Fair Value model to find mathematically profitable edges.</p>
         <h4 style="margin-bottom:0.5rem; color:var(--accent);">Alert Limits & Rules</h4>
         <ul style="font-size:0.85rem; color:var(--muted); margin-left:1.5rem; margin-bottom:1.5rem;">
             <li style="margin-bottom:0.3rem;">Users are limited to a maximum of <strong>5 active alerts</strong> at a time.</li>

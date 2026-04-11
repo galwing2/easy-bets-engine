@@ -8,6 +8,7 @@ const S = {
 let currentAlertMarket = null;
 
 window.onload = async () => {
+    // Intercept redirect parameters from FastAPI
     const urlParams = new URLSearchParams(window.location.search);
     const sid = urlParams.get('session_id');
     const email = urlParams.get('email');
@@ -20,12 +21,14 @@ window.onload = async () => {
         S.sessionId = sid;
         S.userEmail = email;
         S.isGuest = false;
+        // Strip the tokens from the URL immediately so it looks clean
         window.history.replaceState({}, document.title, "/"); 
     } else if (error) {
         alert(error === 'expired_token' ? "Link expired. Please request a new one." : "Invalid login link.");
         window.history.replaceState({}, document.title, "/"); 
     }
 
+    // Auto-Routing: Remember Me & Guest Mode
     if (S.sessionId || S.isGuest) {
         startApp();
     } else {
@@ -62,6 +65,7 @@ async function handleAuth(type) {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || "Server error");
+        
         msg.style.color = "var(--accent)";
         msg.textContent = "Authorization link sent! Check your inbox.";
     } catch (e) {
@@ -80,6 +84,7 @@ function enterAsGuest() {
 }
 
 function toggleAuth() {
+    // If they are a guest clicking "Sign In", or a User clicking "Sign Out"
     localStorage.removeItem('eb_session');
     localStorage.removeItem('eb_email');
     localStorage.removeItem('eb_guest');
@@ -109,7 +114,7 @@ function startApp() {
   if (S.isGuest) {
       document.getElementById('user-display').textContent = "Guest";
       document.getElementById('auth-action-btn').textContent = "[Sign In]";
-      document.getElementById('header-alerts-btn').style.display = 'none';
+      document.getElementById('header-alerts-btn').style.display = 'none'; // Hide alerts hub
   } else {
       document.getElementById('user-display').textContent = S.userEmail;
       document.getElementById('auth-action-btn').textContent = "[Sign Out]";
@@ -194,22 +199,18 @@ function buildCard(m) {
   const tLabel = (m.edge || 0) > 0 ? '📈 EDGE' : '🎯 VALUE';
   const eTxt   = m.edge != null ? `${m.edge > 0 ? '+' : ''}${(m.edge * 100).toFixed(1)}¢` : '—';
 
+  // ASSIGN AN ID based on the market slug so we can scroll to it
+  card.id = m.market_slug ? `market-${m.market_slug}` : '';
   card.className = `market-card ${(m.edge || 0) > 0 ? 'underpriced' : 'value'}`;
-  card.id = `market-${m.market_slug}`;
-  card.dataset.cacheKey  = m.cache_key || '';
-  card.dataset.question  = m.question;
-  card.dataset.yesPrice  = m.yes_price;
-  card.dataset.polyUrl   = m.poly_url || 'https://polymarket.com';
-  card.dataset.marketSlug = m.market_slug || '';
-  card.dataset.endDate   = m.end_date || '';
+  card.dataset.cacheKey = m.cache_key || '';
+  card.dataset.question = m.question;
+  card.dataset.yesPrice = m.yes_price;
+  card.dataset.polyUrl  = m.poly_url || 'https://polymarket.com';
 
   card.innerHTML = `
     <div class="card-main">
-      <div class="card-top" style="align-items:flex-start;">
-        <div style="display:flex; flex-direction:column; gap:.3rem; margin-top:2px; flex-shrink:0;">
-            <span class="card-tag ${tType}">${tLabel}</span>
-            ${m.category ? `<span class="card-tag" style="background:rgba(90,97,128,.12); color:var(--muted); border:1px solid var(--border);">${m.category}</span>` : ''}
-        </div>
+      <div class="card-top">
+        <span class="card-tag ${tType}">${tLabel}</span>
         <div class="card-question">${m.question}</div>
       </div>
       <div class="card-meta">
@@ -219,16 +220,15 @@ function buildCard(m) {
         </div>
         <div class="price-block">
           <span class="price-label">NO</span>
-          <span class="price-val no">${(m.no_price != null ? (m.no_price * 100).toFixed(0) : ((1-m.yes_price)*100).toFixed(0))}¢</span>
+          <span class="price-val no">${((1 - m.yes_price) * 100).toFixed(0)}¢</span>
         </div>
-        ${m.end_date ? `<div class="price-block"><span class="price-label">Ends</span><span class="price-val" style="font-size:.85rem;">${m.end_date}</span></div>` : ''}
         <div class="edge-badge ${eClass}">${eTxt} edge</div>
       </div>
       <div class="card-actions" style="margin-top:.9rem">
         <button class="action-btn yes-btn" onclick="window.open('${m.poly_url || 'https://polymarket.com'}','_blank')">Bet YES ↗</button>
         <button class="action-btn no-btn" onclick="window.open('${m.poly_url || 'https://polymarket.com'}','_blank')">Bet NO ↗</button>
         <button class="action-btn poly-btn" onclick="window.open('${m.poly_url || 'https://polymarket.com'}','_blank')">Polymarket ↗</button>
-        ${!S.isGuest ? `<button class="action-btn poly-btn alert-btn">🔔 Alert</button>` : ''}
+        <button class="action-btn poly-btn alert-btn">🔔 Alert</button>
         <button class="action-btn ai-btn">🤖 Analyze Market</button>
       </div>
     </div>
@@ -236,36 +236,24 @@ function buildCard(m) {
 
   card.querySelector('.ai-btn').addEventListener('click', () => triggerAnalysis(card));
   
-  const alertBtn = card.querySelector('.alert-btn');
-  if (alertBtn) {
-    alertBtn.addEventListener('click', () => {
-      if (S.isGuest) {
-          alert("You must sign in to save alerts!");
-          return;
-      }
-      currentAlertMarket = m;
-      document.getElementById('alert-q').textContent = m.question;
-      document.getElementById('alert-error').textContent = "";
-      document.getElementById('alert-modal').style.display = "flex";
-    });
-  }
+  card.querySelector('.alert-btn').addEventListener('click', () => {
+    if (S.isGuest) {
+        alert("You must sign in to save alerts!");
+        return;
+    }
+    currentAlertMarket = m;
+    document.getElementById('alert-q').textContent = m.question;
+    document.getElementById('alert-error').textContent = "";
+    document.getElementById('alert-modal').style.display = "flex";
+  });
 
   return card;
 }
-/* ─── Alerts ─────────────────────────────────────────────── */
 
-function openAlertModal(card) {
-    currentAlertMarket = {
-        market_slug: card.dataset.marketSlug,
-        question: card.dataset.question,
-    };
-    document.getElementById('alert-q').textContent = card.dataset.question;
-    document.getElementById('alert-error').textContent = '';
-    document.getElementById('alert-modal').style.display = 'flex';
-}
+/* --- ALERT MANAGEMENT --- */
 
 function closeAlertModal() {
-    document.getElementById('alert-modal').style.display = 'none';
+    document.getElementById('alert-modal').style.display = "none";
     currentAlertMarket = null;
 }
 
@@ -279,30 +267,36 @@ async function updateAlertCountBadge() {
 }
 
 async function saveAlert() {
-    const side = document.getElementById('alert-side').value;
-    const price = parseInt(document.getElementById('alert-price').value) / 100;
-    const errorEl = document.getElementById('alert-error');
+    const side      = document.getElementById('alert-side').value;
+    const direction = document.getElementById('alert-direction').value;
+    const price     = parseInt(document.getElementById('alert-price').value) / 100;
+    const errorEl   = document.getElementById('alert-error');
+
     errorEl.textContent = "Saving...";
-    
+
     try {
         const res = await fetch('/api/alerts/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                user_email: S.userEmail,
-                market_slug: currentAlertMarket.market_slug,
-                question: currentAlertMarket.question,
-                target_price: price,
-                target_side: side
+                user_email:       S.userEmail,
+                market_slug:      currentAlertMarket.market_slug,
+                question:         currentAlertMarket.question,
+                target_price:     price,
+                target_side:      side,
+                target_direction: direction
             })
         });
+        
         if (!res.ok) {
             const data = await res.json();
             errorEl.textContent = data.detail || "Error saving alert.";
             return;
         }
+        
         closeAlertModal();
         updateAlertCountBadge();
+        
     } catch (e) {
         errorEl.textContent = "Network error.";
     }
@@ -322,13 +316,18 @@ async function openManageAlerts() {
             list.innerHTML = "<p style='color:var(--muted); text-align:center;'>You have no active alerts.</p>";
             return;
         }
+
         list.innerHTML = data.alerts.map(a => `
             <div style="background:var(--surface2); padding:1rem; border-radius:8px; display:flex; justify-content:space-between; align-items:center; border: 1px solid var(--border);">
                 <div style="padding-right: 1rem;">
                     <div style="font-size:0.85rem; margin-bottom:0.4rem; font-weight:600;">
-                        <a href="javascript:void(0)" onclick="scrollToMarket('${a.market_slug}')" style="color:var(--text); text-decoration:none; border-bottom:1px dashed var(--muted);">${a.question}</a>
+                        <a href="javascript:void(0)" onclick="scrollToMarket('${a.market_slug}')" style="color:var(--text); text-decoration:none; border-bottom:1px dashed var(--muted); transition:color 0.2s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text)'" title="View Market">
+                            ${a.question}
+                        </a>
                     </div>
-                    <span class="card-tag edge" style="font-size:0.7rem;">Target: ${a.target_side} at ${a.target_price * 100}¢</span>
+                    <span class="card-tag edge" style="font-size:0.7rem;">
+                        ${a.target_side} ${a.target_direction === 'above' ? '↑ ≥' : '↓ ≤'} ${a.target_price * 100}¢
+                    </span>
                 </div>
                 <button class="action-btn no-btn" onclick="deleteAlert('${a._id}')" style="flex-shrink:0;">Remove</button>
             </div>
@@ -341,20 +340,33 @@ async function openManageAlerts() {
 async function deleteAlert(id) {
     try {
         const res = await fetch(`/api/alerts/${id}`, { method: 'DELETE' });
-        if(res.ok) { openManageAlerts(); updateAlertCountBadge(); }
-    } catch(e) { alert("Failed to delete alert."); }
+        if(res.ok) {
+            openManageAlerts(); 
+            updateAlertCountBadge(); 
+        }
+    } catch(e) {
+        alert("Failed to delete alert.");
+    }
 }
 
 function scrollToMarket(slug) {
+    // 1. Close the modal
     document.getElementById('manage-alerts-modal').style.display = 'none';
+
+    // 2. Reset the filters to "All" to ensure the target card isn't currently hidden
     const allSportBtn = document.querySelector('#sport-filters .filter-chip');
     if (allSportBtn) setSportFilter('all', allSportBtn);
+    
     const allEdgeBtn = document.querySelector('.subfilter-chip.active-all') || document.querySelector('.subfilter-chip');
     if (allEdgeBtn) setEdgeFilter('all', allEdgeBtn);
+
+    // 3. Give the DOM a millisecond to apply the filters, then scroll
     setTimeout(() => {
         const targetCard = document.getElementById(`market-${slug}`);
         if (targetCard) {
             targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            
+            // Briefly highlight the card to draw the user's eye
             targetCard.style.transition = 'box-shadow 0.3s ease-in-out';
             targetCard.style.boxShadow = '0 0 0 3px var(--accent)';
             setTimeout(() => { targetCard.style.boxShadow = ''; }, 2000);
@@ -364,46 +376,26 @@ function scrollToMarket(slug) {
     }, 50);
 }
 
-/* ─── AI ANALYSIS ────────────────────────────────────────── */
+/* --- AI ANALYSIS --- */
 
 async function triggerAnalysis(card) {
-  const btn      = card.querySelector('.ai-btn');
-  const panel    = card.querySelector('.ai-panel');
+  const btn = card.querySelector('.ai-btn');
+  const panel = card.querySelector('.ai-panel');
   const cacheKey = card.dataset.cacheKey;
   const question = card.dataset.question;
   const yesPrice = parseFloat(card.dataset.yesPrice);
-  const polyUrl  = card.dataset.polyUrl;
-  const marketSlug = card.dataset.marketSlug || '';
-  const endDate    = card.dataset.endDate || '';
+  const polyUrl = card.dataset.polyUrl;
 
-  btn.textContent = '⏳ Debating...';
+  btn.textContent = '⏳ Researching...';
   btn.disabled = true;
   panel.style.display = 'block';
-  panel.innerHTML = `
-    <div class="ai-skeleton">
-      <div class="debate-loading">
-        <div class="agent-loading bull-loading">🐂 Bull building case...</div>
-        <div class="agent-loading bear-loading">🐻 Bear building case...</div>
-        <div class="agent-loading judge-loading">⚖️ Judge deliberating...</div>
-      </div>
-      <div class="skel-header" style="margin-top:1rem;"><div class="skel-badge"></div><div class="skel-badge" style="width:60px"></div></div>
-      <div class="skel-line m"></div><div class="skel-line l"></div><div class="skel-line s"></div>
-    </div>`;
-
-  // Animate the loading agents sequentially
-  const bullEl  = panel.querySelector('.bull-loading');
-  const bearEl  = panel.querySelector('.bear-loading');
-  const judgeEl = panel.querySelector('.judge-loading');
-  setTimeout(() => bullEl  && (bullEl.classList.add('agent-done')),  3000);
-  setTimeout(() => bearEl  && (bearEl.classList.add('agent-done')),  5000);
-  setTimeout(() => judgeEl && (judgeEl.classList.add('agent-active')), 5500);
+  panel.innerHTML = `<div class="ai-skeleton"><div class="skel-header"><div class="skel-badge"></div><div class="skel-badge" style="width:60px"></div></div><div class="skel-line m"></div><div class="skel-line l"></div><div class="skel-line s"></div></div>`;
 
   try {
     const r = await fetch('/api/analyze-market', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cache_key: cacheKey, question, yes_price: yesPrice,
-                             market_slug: marketSlug, end_date: endDate }),
+      body: JSON.stringify({ cache_key: cacheKey, question, yes_price: yesPrice }),
     });
     let data;
     try { data = await r.json(); } catch (_) {
@@ -428,224 +420,61 @@ async function triggerAnalysis(card) {
 }
 
 function renderAIPanel(panel, res, yesPrice, polyUrl, fromCache) {
-  const fv      = res.fair_value ?? yesPrice;
-  const conf    = (res.confidence || 'low').toLowerCase();
+  const fv = res.fair_value ?? yesPrice;
+  const conf = (res.confidence || 'low').toLowerCase();
   const verdict = res.verdict || 'SKIP';
   const edgePct = res.edge_pct ?? ((fv - yesPrice) * 100);
-  const sbImp   = res.sportsbook_implied;
-  const lvl     = conf === 'high' ? 3 : conf === 'medium' ? 2 : 1;
-  const dots    = [1,2,3].map(i => `<div class="conf-dot ${i<=lvl ? 'on-'+conf : ''}"></div>`).join('');
+  const sbImp = res.sportsbook_implied;
+  const lvl = conf === 'high' ? 3 : conf === 'medium' ? 2 : 1;
+  const dots = [1, 2, 3].map(i => `<div class="conf-dot ${i <= lvl ? 'on-' + conf : ''}"></div>`).join('');
   const verdictMap = { BUY_YES:'🟢 BUY YES', BUY_NO:'🔴 BUY NO', FAIR:'⚪ FAIR', SKIP:'⏭ SKIP' };
-  const edgeClass  = edgePct > 0.5 ? 'pos' : edgePct < -0.5 ? 'neg' : 'neu';
-  const edgeStr    = `${edgePct > 0 ? '+' : ''}${edgePct.toFixed(1)}¢`;
-  const barFill    = Math.round(fv * 100);
-  const tickLeft   = Math.round(yesPrice * 100);
-  const barClass   = fv >= yesPrice ? 'bull' : 'bear';
-  const isDebate   = res.debate_mode === true;
+  const edgeClass = edgePct > 0.5 ? 'pos' : edgePct < -0.5 ? 'neg' : 'neu';
+  const edgeStr = `${edgePct > 0 ? '+' : ''}${edgePct.toFixed(1)}¢`;
+  const barFill = Math.round(fv * 100);
+  const tickLeft = Math.round(yesPrice * 100);
+  const barClass = fv >= yesPrice ? 'bull' : 'bear';
 
   const compareHTML = `<div class="compare-row">
-    <div class="compare-item"><span class="compare-lbl">Market (YES)</span><span class="compare-val market">${(yesPrice*100).toFixed(0)}¢</span></div>
-    <div class="compare-item"><span class="compare-lbl">AI Fair Value</span><span class="compare-val ai">${(fv*100).toFixed(0)}¢</span></div>
-    ${sbImp != null ? `<div class="compare-item"><span class="compare-lbl">Sportsbooks</span><span class="compare-val sb">${(sbImp*100).toFixed(0)}¢</span></div>` : ''}
-    ${isDebate && res.bull_prob != null ? `<div class="compare-item"><span class="compare-lbl">🐂 Bull</span><span class="compare-val" style="color:var(--accent)">${res.bull_prob}%</span></div>` : ''}
-    ${isDebate && res.bear_prob != null ? `<div class="compare-item"><span class="compare-lbl">🐻 Bear</span><span class="compare-val" style="color:var(--danger)">${res.bear_prob}%</span></div>` : ''}
-  </div>`;
-
-  // Multi-agent debate summary block
-  const debateHTML = isDebate && (res.bull_summary || res.bear_summary) ? `
-    <div class="debate-summary">
-      ${res.bull_summary ? `<div class="debate-side bull-side"><span class="debate-label">🐂 Bull</span><span class="debate-text">${res.bull_summary}</span></div>` : ''}
-      ${res.bear_summary ? `<div class="debate-side bear-side"><span class="debate-label">🐻 Bear</span><span class="debate-text">${res.bear_summary}</span></div>` : ''}
-      <div class="debate-divider">⚖️ Judge's Verdict</div>
-    </div>` : '';
-
+      <div class="compare-item"><span class="compare-lbl">Market (YES)</span><span class="compare-val market">${(yesPrice * 100).toFixed(0)}¢</span></div>
+      <div class="compare-item"><span class="compare-lbl">AI Fair Value</span><span class="compare-val ai">${(fv * 100).toFixed(0)}¢</span></div>
+      ${sbImp != null ? `<div class="compare-item"><span class="compare-lbl">Sportsbooks</span><span class="compare-val sb">${(sbImp * 100).toFixed(0)}¢</span></div>` : ''}
+    </div>`;
   const factsHTML = (res.key_facts || []).map(f => `<div class="fact-item"><span class="fact-dot">→</span>${f}</div>`).join('');
 
   panel.innerHTML = `<div class="ai-loaded">
-    <div class="ai-header">
-      <span class="ai-label">AI Analysis</span>
-      ${isDebate ? '<span class="debate-badge">⚔️ Debate Mode</span>' : ''}
-      <span class="verdict-pill verdict-${verdict}">${verdictMap[verdict] || verdict}</span>
-      <span class="edge-chip ${edgeClass}">${edgeStr} edge</span>
-      <div class="conf-wrap"><span class="ai-label">Confidence</span><div class="conf-dots">${dots}</div></div>
-      ${fromCache ? '<span class="cache-badge">● cached</span>' : ''}
-    </div>
-    <div class="prob-section">
-      <div class="prob-row-labels"><span>0%</span><span>AI fair value — ${(fv*100).toFixed(0)}% YES</span><span>100%</span></div>
-      <div class="prob-track"><div class="prob-fill ${barClass}" style="width:${barFill}%"></div><div class="market-marker" style="left:${tickLeft}%"></div></div>
-    </div>
-    ${compareHTML}
-    ${debateHTML}
-    <div class="ai-reasoning">${res.reasoning || ''}</div>
-    ${factsHTML ? `<div class="key-facts">${factsHTML}</div>` : ''}
-  </div>`;
+      <div class="ai-header">
+        <span class="ai-label">AI Analysis</span>
+        <span class="verdict-pill verdict-${verdict}">${verdictMap[verdict] || verdict}</span>
+        <span class="edge-chip ${edgeClass}">${edgeStr} edge</span>
+        <div class="conf-wrap"><span class="ai-label">Confidence</span><div class="conf-dots">${dots}</div></div>
+        ${fromCache ? '<span class="cache-badge">● cached</span>' : ''}
+      </div>
+      <div class="prob-section">
+        <div class="prob-row-labels"><span>0%</span><span>AI fair value — ${(fv * 100).toFixed(0)}% YES</span><span>100%</span></div>
+        <div class="prob-track"><div class="prob-fill ${barClass}" style="width:${barFill}%"></div><div class="market-marker" style="left:${tickLeft}%"></div></div>
+      </div>
+      ${compareHTML}
+      <div class="ai-reasoning">${res.reasoning || ''}</div>
+      ${factsHTML ? `<div class="key-facts">${factsHTML}</div>` : ''}
+    </div>`;
+}
+/* ── Alert direction hint ─────────────────────────────────── */
+function updateDirectionHint() {
+    const side      = document.getElementById('alert-side').value;
+    const direction = document.getElementById('alert-direction').value;
+    const price     = document.getElementById('alert-price').value;
+    const hint      = document.getElementById('alert-direction-hint');
+    if (!hint) return;
+    hint.textContent = direction === 'below'
+        ? `Alert fires when ${side} price drops to ${price}¢ or lower.`
+        : `Alert fires when ${side} price rises to ${price}¢ or higher.`;
 }
 
-
-/* ═══════════════════════════════════════════════════════════
-   FEATURE 1: PERFORMANCE / TRACK RECORD DASHBOARD
-   ═══════════════════════════════════════════════════════════ */
-
-async function loadPerformance() {
-  // Reset to loading state
-  ['kpi-winrate','kpi-roi','kpi-resolved','kpi-pending'].forEach(id => {
-    document.getElementById(id).querySelector('.kpi-val').textContent = '...';
-  });
-  document.getElementById('perf-list').innerHTML =
-    '<div class="loading-state"><div class="spinner"></div><div class="loading-text">Loading track record...</div></div>';
-
-  try {
-    const res  = await fetch('/api/predictions/stats');
-    const data = await res.json();
-    renderPerformance(data);
-  } catch (e) {
-    document.getElementById('perf-list').innerHTML =
-      `<div class="ai-error">⚠ Failed to load performance data: ${e.message}</div>`;
-  }
-}
-
-function renderPerformance(data) {
-  // KPI Cards
-  const wr = data.win_rate != null ? `${data.win_rate}%` : '--';
-  const roi = data.roi_pct != null
-    ? `${data.roi_pct > 0 ? '+' : ''}${data.roi_pct}%`
-    : '--';
-
-  setKpi('kpi-winrate',  wr,   data.win_rate  != null ? (data.win_rate  >= 55 ? 'good' : data.win_rate >= 45 ? 'neutral' : 'bad') : '');
-  setKpi('kpi-roi',      roi,  data.roi_pct   != null ? (data.roi_pct   > 0  ? 'good' : 'bad') : '');
-  setKpi('kpi-resolved', data.resolved ?? '--', '');
-  setKpi('kpi-pending',  data.unresolved ?? '--', '');
-
-  document.getElementById('perf-total-badge').textContent = `${data.total || 0} total AI calls`;
-
-  // Draw chart
-  if (data.chart_data && data.chart_data.length > 1) {
-    drawWinRateChart(data.chart_data);
-  } else {
-    document.getElementById('perf-chart').style.display = 'none';
-  }
-
-  // Recent predictions list
-  const list = document.getElementById('perf-list');
-  if (!data.recent || data.recent.length === 0) {
-    list.innerHTML = `<div class="no-results"><div class="no-results-text">No AI predictions recorded yet. Start analyzing markets to build the track record.</div></div>`;
-    return;
-  }
-
-  list.innerHTML = data.recent.map(p => {
-    const statusIcon = p.resolved
-      ? (p.won ? '✅' : '❌')
-      : '⏳';
-    const statusLabel = p.resolved
-      ? (p.won ? 'Won' : 'Lost')
-      : 'Pending';
-    const statusClass = p.resolved
-      ? (p.won ? 'pred-won' : 'pred-lost')
-      : 'pred-pending';
-    const verdictClass = p.verdict === 'BUY_YES' ? 'edge' : 'value';
-    const verdictLabel = p.verdict === 'BUY_YES' ? '🟢 BUY YES' : '🔴 BUY NO';
-    const edgeStr = p.edge_pct != null
-      ? `${p.edge_pct > 0 ? '+' : ''}${p.edge_pct.toFixed(1)}¢`
-      : '';
-    const resolveInfo = p.resolved && p.resolve_price != null
-      ? `<span style="font-size:0.75rem; color:var(--muted);">Settled @ ${(p.resolve_price*100).toFixed(0)}¢</span>`
-      : '';
-
-    return `
-      <div class="pred-card ${statusClass}">
-        <div class="pred-status">${statusIcon}</div>
-        <div class="pred-body">
-          <div class="pred-question">${p.question || 'Unknown market'}</div>
-          <div class="pred-meta">
-            <span class="card-tag ${verdictClass}">${verdictLabel}</span>
-            <span class="card-tag" style="background:rgba(90,97,128,.12); color:var(--muted); border:1px solid var(--border);">
-              Entry: ${p.yes_price != null ? (p.yes_price*100).toFixed(0)+'¢ YES' : '--'}
-            </span>
-            ${edgeStr ? `<span class="card-tag" style="background:rgba(0,176,255,.1); color:var(--accent2); border:1px solid rgba(0,176,255,.2);">${edgeStr} edge</span>` : ''}
-            <span class="card-tag conf-${p.confidence || 'low'}" style="font-size:0.65rem;">${(p.confidence || 'low').toUpperCase()}</span>
-            ${resolveInfo}
-          </div>
-        </div>
-        <div class="pred-result ${statusClass}">${statusLabel}</div>
-      </div>`;
-  }).join('');
-}
-
-function setKpi(id, value, quality) {
-  const el = document.getElementById(id);
-  const valEl = el.querySelector('.kpi-val');
-  valEl.textContent = value;
-  el.className = `kpi-card ${quality ? 'kpi-' + quality : ''}`;
-}
-
-function drawWinRateChart(chartData) {
-  const canvas  = document.getElementById('perf-chart');
-  canvas.style.display = 'block';
-  const ctx     = canvas.getContext('2d');
-  const W       = canvas.offsetWidth || 800;
-  const H       = 180;
-  canvas.width  = W;
-  canvas.height = H;
-
-  const pad   = { top: 20, right: 20, bottom: 30, left: 40 };
-  const inner = { w: W - pad.left - pad.right, h: H - pad.top - pad.bottom };
-  const n     = chartData.length;
-
-  ctx.clearRect(0, 0, W, H);
-
-  // Grid lines at 25%, 50%, 75%
-  ctx.strokeStyle = '#1f2433';
-  ctx.lineWidth   = 1;
-  [25, 50, 75].forEach(pct => {
-    const y = pad.top + inner.h - (pct / 100) * inner.h;
-    ctx.beginPath();
-    ctx.moveTo(pad.left, y);
-    ctx.lineTo(pad.left + inner.w, y);
-    ctx.stroke();
-    ctx.fillStyle = '#5a6180';
-    ctx.font = '10px DM Mono, monospace';
-    ctx.fillText(pct + '%', 4, y + 4);
-  });
-
-  // 50% reference line (break-even)
-  const y50 = pad.top + inner.h - 0.5 * inner.h;
-  ctx.strokeStyle = 'rgba(255,179,0,0.4)';
-  ctx.setLineDash([4, 4]);
-  ctx.beginPath();
-  ctx.moveTo(pad.left, y50);
-  ctx.lineTo(pad.left + inner.w, y50);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Win-rate line
-  ctx.strokeStyle = '#00e676';
-  ctx.lineWidth   = 2;
-  ctx.beginPath();
-  chartData.forEach((pt, i) => {
-    const x = pad.left + (i / (n - 1)) * inner.w;
-    const y = pad.top + inner.h - (pt.win_rate / 100) * inner.h;
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-
-  // Dots for each resolved call (green = won, red = lost)
-  chartData.forEach((pt, i) => {
-    const x = pad.left + (i / (n - 1)) * inner.w;
-    const y = pad.top + inner.h - (pt.win_rate / 100) * inner.h;
-    ctx.beginPath();
-    ctx.arc(x, y, 3.5, 0, Math.PI * 2);
-    ctx.fillStyle = pt.won ? '#00e676' : '#ff4444';
-    ctx.fill();
-  });
-
-  // X-axis labels
-  ctx.fillStyle = '#5a6180';
-  ctx.font = '10px DM Mono, monospace';
-  ctx.textAlign = 'center';
-  [0, Math.floor(n/2), n-1].forEach(i => {
-    if (chartData[i]) {
-      const x = pad.left + (i / (n - 1)) * inner.w;
-      ctx.fillText(`#${chartData[i].n}`, x, H - 6);
-    }
-  });
-}
+document.addEventListener('DOMContentLoaded', () => {
+    ['alert-side', 'alert-direction'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', updateDirectionHint);
+    });
+    const priceEl = document.getElementById('alert-price');
+    if (priceEl) priceEl.addEventListener('input', updateDirectionHint);
+});
