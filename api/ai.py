@@ -329,8 +329,8 @@ async def _multi_agent_debate(question: str, yes_price: float, web_context: str)
             edge = (fv - yes_price) * 100
             result["fair_value"] = fv
             result["edge_pct"]   = edge
-            if edge > 5.0: result["verdict"] = "BUY_YES"
-            elif edge < -5.0: result["verdict"] = "BUY_NO"
+            if edge >= 2.0: result["verdict"] = "BUY_YES"
+            elif edge <= -2.0: result["verdict"] = "BUY_NO"
             else: result["verdict"] = "FAIR"
                 
         result["debate_mode"] = False
@@ -365,16 +365,19 @@ async def _multi_agent_debate(question: str, yes_price: float, web_context: str)
     bull_score = int(judge_raw.get("bull_score", 0))
     bear_score = int(judge_raw.get("bear_score", 0))
     
+    # 1. Increased max LLM shift from 3% to 5%
     score_diff = bull_score - bear_score
-    qualitative_shift = (score_diff / 5.0) * 0.03
+    qualitative_shift = (score_diff / 5.0) * 0.05 
+    
     fair_value = anchor_price + qualitative_shift
     fair_value = max(0.01, min(0.99, fair_value))
     
     edge_pct = fair_value - yes_price
     
-    if edge_pct > 0.05:
+    # 2. Lowered BUY trigger threshold from 5% down to 2%
+    if edge_pct >= 0.02:
         verdict = "BUY_YES"
-    elif edge_pct < -0.05:
+    elif edge_pct <= -0.02:
         verdict = "BUY_NO"
     else:
         verdict = "FAIR"
