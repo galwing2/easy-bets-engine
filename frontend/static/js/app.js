@@ -290,7 +290,12 @@ async function saveAlert() {
         
         if (!res.ok) {
             const data = await res.json();
-            errorEl.textContent = data.detail || "Error saving alert.";
+            console.error("Alert save failed:", data);
+            if (Array.isArray(data.detail)) {
+                errorEl.textContent = data.detail.map(e => (e.loc?.slice(-1)[0] || "") + ": " + e.msg).join(" | ");
+            } else {
+                errorEl.textContent = data.detail || JSON.stringify(data);
+            }
             return;
         }
         
