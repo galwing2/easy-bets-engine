@@ -11,7 +11,6 @@
 </head>
 <body>
 
-  <!-- Landing Screen -->
   <div id="screen-landing" class="screen active">
     <div class="grid-bg"></div>
     <div class="glow-orb green"></div>
@@ -36,12 +35,14 @@
     </div>
   </div>
 
-  <!-- Markets Screen -->
   <div id="screen-markets" class="screen">
     <div class="markets-header">
       <div class="markets-logo">EASY<span>BETS</span></div>
       <div style="margin-left:auto;display:flex;align-items:center;gap:1rem;">
         <button class="action-btn poly-btn" onclick="document.getElementById('about-modal').style.display='flex'">About</button>
+        
+        <button class="action-btn poly-btn" onclick="openTrackRecord()">📈 Track Record</button>
+
         <button id="header-alerts-btn" class="action-btn ai-btn" onclick="openManageAlerts()">My Alerts (<span id="alert-usage">0</span>/5)</button>
         <div class="profile-pill" style="cursor:default;">
           <div class="profile-dot"></div>
@@ -69,7 +70,6 @@
     </div>
   </div>
 
-  <!-- Create Alert Modal -->
   <div id="alert-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:center;justify-content:center;">
     <div style="background:var(--surface);border:1px solid var(--border);padding:2rem;border-radius:12px;max-width:400px;width:100%;margin:1rem;">
       <h3 style="margin-bottom:1rem;">Set Price Alert</h3>
@@ -100,7 +100,6 @@
     </div>
   </div>
 
-  <!-- Manage Alerts Modal -->
   <div id="manage-alerts-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:center;justify-content:center;">
     <div style="background:var(--surface);border:1px solid var(--border);padding:2rem;border-radius:12px;max-width:500px;width:100%;margin:1rem;max-height:80vh;display:flex;flex-direction:column;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;">
@@ -111,7 +110,16 @@
     </div>
   </div>
 
-  <!-- About Modal -->
+  <div id="track-record-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:var(--surface);border:1px solid var(--border);padding:2rem;border-radius:12px;max-width:600px;width:100%;margin:1rem;max-height:80vh;display:flex;flex-direction:column;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;">
+        <h3>AI Track Record</h3>
+        <button onclick="closeTrackRecord()" style="background:none;border:none;color:var(--muted);font-size:1.5rem;cursor:pointer;">&times;</button>
+      </div>
+      <div id="track-record-list" style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:0.8rem;"></div>
+    </div>
+  </div>
+
   <div id="about-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:center;justify-content:center;">
     <div style="background:var(--surface);border:1px solid var(--border);padding:2rem;border-radius:12px;max-width:450px;width:100%;margin:1rem;line-height:1.6;">
       <h3 style="margin-bottom:1rem;">How EasyBets Works</h3>
@@ -131,6 +139,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=3"></script>
+  <script src="/static/js/app.js?v=4"></script>
 </body>
 </html>

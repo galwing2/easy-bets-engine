@@ -276,7 +276,6 @@ async function saveAlert() {
     const direction = directionEl.value;
     const price     = parseInt(priceEl.value) / 100;
 
-    // Guard: direction must be exactly "above" or "below"
     if (direction !== 'above' && direction !== 'below') {
         errorEl.textContent = 'Invalid direction. Please reload the page and try again.';
         return;
@@ -291,7 +290,6 @@ async function saveAlert() {
         target_direction: direction
     };
 
-    console.log('Saving alert:', JSON.stringify(payload));
     errorEl.textContent = 'Saving...';
 
     try {
@@ -303,7 +301,6 @@ async function saveAlert() {
 
         if (!res.ok) {
             const data = await res.json();
-            console.error('Alert save failed:', data);
             if (Array.isArray(data.detail)) {
                 errorEl.textContent = data.detail.map(e => `${e.loc?.slice(-1)[0] || ''}: ${e.msg}`).join(' | ');
             } else {
@@ -485,4 +482,58 @@ function renderAIPanel(panel, res, yesPrice, polyUrl, fromCache) {
         <div class="ai-reasoning">${res.reasoning || ''}</div>
         ${factsHTML ? `<div class="key-facts">${factsHTML}</div>` : ''}
     </div>`;
+}
+
+/* ── AI Track Record ─────────────────────────────────────── */
+
+async function openTrackRecord() {
+    document.getElementById('track-record-modal').style.display = 'flex';
+    const list = document.getElementById('track-record-list');
+    list.innerHTML = '<div class="loading-state"><div class="spinner"></div><div class="loading-text">Loading predictions...</div></div>';
+
+    try {
+        const res = await fetch('/api/predictions');
+        if (!res.ok) throw new Error('Failed to fetch data');
+        const data = await res.json();
+        
+        // Handle standard list or dictionary wrappers
+        const preds = data.predictions || data;
+
+        if (!preds || !preds.length) {
+            list.innerHTML = "<p style='color:var(--muted);text-align:center;'>No AI predictions recorded yet. Ask the AI to analyze some markets!</p>";
+            return;
+        }
+
+        list.innerHTML = preds.map(p => {
+            const isCorrect = p.resolved && p.won;
+            let statusBadge = '<span style="color:var(--accent);font-weight:bold;">⏳ PENDING</span>';
+            if (p.resolved) {
+                statusBadge = isCorrect 
+                    ? '<span style="color:#00e676;font-weight:bold;">✅ WON</span>' 
+                    : '<span style="color:var(--danger);font-weight:bold;">❌ LOST</span>';
+            }
+
+            const verdictColor = p.ai_verdict === 'BUY_YES' ? '#00e676' : 'var(--danger)';
+            const verdictText  = p.ai_verdict.replace('_', ' ');
+
+            return `
+            <div style="background:var(--surface2);padding:1rem;border-radius:8px;border:1px solid var(--border);">
+              <div style="font-size:0.9rem;margin-bottom:0.5rem;font-weight:600;color:var(--text);">${p.question}</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;color:var(--muted);">
+                <div>
+                  <strong style="color:${verdictColor};">${verdictText}</strong> at ${(p.entry_price * 100).toFixed(0)}¢
+                  <span style="margin:0 5px;">|</span>
+                  Fair Value: ${(p.fair_value * 100).toFixed(0)}¢
+                </div>
+                <div>${statusBadge}</div>
+              </div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        list.innerHTML = `<p style='color:var(--danger);text-align:center;'>Failed to load track record: ${e.message}</p>`;
+    }
+}
+
+function closeTrackRecord() {
+    document.getElementById('track-record-modal').style.display = 'none';
 }
