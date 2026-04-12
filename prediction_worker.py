@@ -114,4 +114,4 @@ if __name__ == "__main__":
     print("Starting EasyBets prediction resolution worker (runs every 24h)...")
     while True:
         run_once()
-        time.sleep(86400)  # 24 hours
+        time.sleep(43200)  # 12 hours
