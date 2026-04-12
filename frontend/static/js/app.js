@@ -397,12 +397,13 @@ function scrollToMarket(slug) {
 /* ── AI Analysis ─────────────────────────────────────────── */
 
 async function triggerAnalysis(card) {
-    const btn      = card.querySelector('.ai-btn');
-    const panel    = card.querySelector('.ai-panel');
-    const cacheKey = card.dataset.cacheKey;
-    const question = card.dataset.question;
-    const yesPrice = parseFloat(card.dataset.yesPrice);
-    const polyUrl  = card.dataset.polyUrl;
+    const btn        = card.querySelector('.ai-btn');
+    const panel      = card.querySelector('.ai-panel');
+    const cacheKey   = card.dataset.cacheKey;
+    const question   = card.dataset.question;
+    const yesPrice   = parseFloat(card.dataset.yesPrice);
+    const polyUrl    = card.dataset.polyUrl;
+    const marketSlug = card.dataset.marketSlug || '';
 
     btn.textContent  = '⏳ Researching...';
     btn.disabled     = true;
@@ -416,7 +417,7 @@ async function triggerAnalysis(card) {
         const r = await fetch('/api/analyze-market', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cache_key: cacheKey, question, yes_price: yesPrice })
+            body: JSON.stringify({ cache_key: cacheKey, question, yes_price: yesPrice, market_slug: marketSlug })
         });
         let data;
         try { data = await r.json(); } catch (_) {
@@ -492,7 +493,7 @@ async function openTrackRecord() {
   list.innerHTML = '<div class="loading-state"><div class="spinner"></div><div class="loading-text">Loading predictions...</div></div>';
 
   try {
-      const res = await fetch('/api/predictions');
+      const res = await fetch('/api/routes/predictions');
       if (!res.ok) throw new Error('Failed to fetch data');
       const data = await res.json();
       
@@ -558,18 +559,17 @@ function createTrackRecordCard(p) {
           : '<span style="color:var(--danger);font-weight:bold;">❌ LOST</span>';
   }
 
-  const verdict      = p.ai_verdict || p.verdict || 'UNKNOWN';
-  const verdictColor = verdict === 'BUY_YES' ? '#00e676' : 'var(--danger)';
-  const verdictText  = verdict.replace('_', ' ');
+  const verdictColor = p.ai_verdict === 'BUY_YES' ? '#00e676' : 'var(--danger)';
+  const verdictText  = p.ai_verdict.replace('_', ' ');
 
   return `
   <div style="background:var(--surface2);padding:1rem;border-radius:8px;border:1px solid var(--border);">
     <div style="font-size:0.9rem;margin-bottom:0.5rem;font-weight:600;color:var(--text);">${p.question}</div>
     <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;color:var(--muted);">
       <div>
-        <strong style="color:${verdictColor};">${verdictText}</strong>${p.entry_price != null ? ' at ' + (p.entry_price * 100).toFixed(0) + '¢' : ''}
+        <strong style="color:${verdictColor};">${verdictText}</strong> at ${(p.entry_price * 100).toFixed(0)}¢
         <span style="margin:0 5px;">|</span>
-        ${p.fair_value != null ? 'Fair Value: ' + (p.fair_value * 100).toFixed(0) + '¢' : ''}
+        Fair Value: ${(p.fair_value * 100).toFixed(0)}¢
       </div>
       <div>${statusBadge}</div>
     </div>

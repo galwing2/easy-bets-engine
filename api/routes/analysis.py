@@ -31,7 +31,7 @@ async def analyze_market(body: AnalyzeRequest):
                 db["predictions"].insert_one({
                     "cache_key":   body.cache_key,
                     "question":    body.question,
-                    "market_slug": getattr(body, "market_slug", ""),
+                    "market_slug": body.market_slug,
                     "yes_price":   body.yes_price,
                     "entry_price": body.yes_price,
                     "verdict":     verdict,

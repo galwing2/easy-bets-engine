@@ -11,6 +11,7 @@ class AnalyzeRequest(BaseModel):
     cache_key: str
     question: str
     yes_price: float
+    market_slug: str = ""  # needed to resolve predictions later
 
 class MagicLinkRequest(BaseModel):
     email: str
