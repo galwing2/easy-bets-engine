@@ -52,28 +52,30 @@ def prediction_stats():
     db = get_db()
     
     # We remove {"_id": 0} here because we need the IDs, we'll convert them to strings below
-    all_preds = list(db["predictions"].find().sort("created_at", -1))
+    # Sort in Python to avoid issues with mixed created_at field types in DB
+    all_preds = list(db["predictions"].find())
+    all_preds.sort(key=lambda p: str(p.get("created_at", "")), reverse=True)
 
-    resolved   = [p for p in all_preds if p.get("resolved")]
+    resolved   = [p for p in all_preds if p.get("resolved") is True]
     unresolved = [p for p in all_preds if not p.get("resolved")]
     wins       = [p for p in resolved if p.get("won") is True]
     losses     = [p for p in resolved if p.get("won") is False]
 
     win_rate = round(len(wins) / len(resolved) * 100, 1) if resolved else None
 
-    # Simple flat ROI: each prediction stakes 1 unit.
+    # ROI calculation — fully guarded against None/zero prices
     total_roi = 0.0
     for p in resolved:
-        # Fallback support for older DB entries
-        yp = p.get("yes_price", p.get("entry_price", 0.5))
-        verdict = p.get("verdict", p.get("ai_verdict"))
-        
-        if verdict == "BUY_YES":
-            total_roi += (1 / yp - 1) if p["won"] else -1
-        else:  # BUY_NO
-            no_p = 1 - yp
-            if no_p > 0:
-                total_roi += (1 / no_p - 1) if p["won"] else -1
+        yp      = p.get("yes_price") or p.get("entry_price") or 0.5
+        verdict = p.get("verdict") or p.get("ai_verdict") or ""
+        try:
+            if verdict == "BUY_YES":
+                total_roi += (1 / yp - 1) if p.get("won") else -1
+            elif verdict == "BUY_NO":
+                no_p = 1 - yp
+                total_roi += (1 / no_p - 1) if p.get("won") else -1
+        except (ZeroDivisionError, TypeError):
+            continue
 
     roi_pct = round(total_roi / len(resolved) * 100, 1) if resolved else None
 
@@ -84,22 +86,22 @@ def prediction_stats():
         if p.get("won"):
             running_wins += 1
         chart_data.append({
-            "n":       i,
+            "n":        i,
             "win_rate": round(running_wins / i * 100, 1),
             "won":      p.get("won"),
-            "verdict":  p.get("verdict", p.get("ai_verdict")),
-            "question": p.get("question", "")[:60],
+            "verdict":  p.get("verdict") or p.get("ai_verdict"),
+            "question": (p.get("question") or "")[:60],
             "edge_pct": p.get("edge_pct"),
         })
 
-    # FIXED 3: Convert variables to exactly what app.js expects to see
+    # Normalise field names and convert _id to string for JSON serialisation
     for p in all_preds:
-        p["_id"] = str(p["_id"])
-        p["ai_verdict"] = p.get("verdict", p.get("ai_verdict"))
-        p["entry_price"] = p.get("yes_price", p.get("entry_price"))
+        p["_id"]        = str(p["_id"])
+        p["ai_verdict"] = p.get("verdict") or p.get("ai_verdict")
+        p["entry_price"]= p.get("yes_price") or p.get("entry_price")
 
     return {
-        "predictions": all_preds,  # <--- app.js reads this exact key!
+        "predictions": all_preds,
         "total":       len(all_preds),
         "resolved":    len(resolved),
         "unresolved":  len(unresolved),
