@@ -19,7 +19,7 @@ async def analyze_market(body: AnalyzeRequest):
     Lazy-loaded per card. Returns cached MongoDB result (<6 hrs) or calls Gemini.
     Auto-saves high/medium-confidence BUY verdicts to the predictions collection.
     """
-    result, from_cache = analyze(body.cache_key, body.question, body.yes_price)
+    result, from_cache = await analyze(body.cache_key, body.question, body.yes_price)
 
     # Auto-save qualifying predictions for the track record
     if not from_cache and "error" not in result:
