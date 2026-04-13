@@ -5,54 +5,45 @@ from datetime import datetime, timezone
 from fastapi import APIRouter
 from api.db import get_db
 
-# FIXED 1: Changed prefix to exactly match what app.js requests
 router = APIRouter(prefix="/api/predictions", tags=["predictions"])
+
 
 @router.post("/save")
 def save_prediction(body: dict):
-    """
-    Called internally after a high/medium-confidence BUY verdict.
-    Idempotent: upserts on cache_key so the same market isn't double-counted.
-    """
-    db = get_db()
+    db        = get_db()
     cache_key = body.get("cache_key")
     if not cache_key:
         return {"ok": False, "reason": "missing cache_key"}
 
-    existing = db["predictions"].find_one({"cache_key": cache_key})
-    if existing:
+    if db["predictions"].find_one({"cache_key": cache_key}):
         return {"ok": True, "skipped": True}
 
-    doc = {
-        "cache_key":   cache_key,
-        "question":    body.get("question", ""),
-        "market_slug": body.get("market_slug", ""),
-        "yes_price":   body.get("yes_price", body.get("entry_price")),
-        "verdict":     body.get("verdict", body.get("ai_verdict")),         
-        "fair_value":  body.get("fair_value"),
-        "edge_pct":    body.get("edge_pct"),
-        "confidence":  body.get("confidence"),
-        "end_date":    body.get("end_date", ""),
-        "resolved":    False,
-        "won":         None,                        
+    db["predictions"].insert_one({
+        "cache_key":     cache_key,
+        "question":      body.get("question", ""),
+        "market_slug":   body.get("market_slug", ""),
+        "yes_price":     body.get("yes_price"),
+        "entry_price":   body.get("yes_price"),
+        "verdict":       body.get("verdict"),
+        "ai_verdict":    body.get("verdict"),
+        "fair_value":    body.get("fair_value"),
+        "edge_pct":      body.get("edge_pct"),
+        "confidence":    body.get("confidence"),
+        "end_date":      body.get("end_date", ""),
+        "resolved":      False,
+        "won":           None,
         "resolve_price": None,
-        "created_at":  datetime.now(timezone.utc).isoformat(),
-        "resolved_at": None,
-    }
-    db["predictions"].insert_one(doc)
+        "created_at":    datetime.now(timezone.utc).isoformat(),
+        "resolved_at":   None,
+    })
     return {"ok": True, "saved": True}
 
 
-# FIXED 2: Changed from "/stats" to "" so fetch('/api/predictions') hits this directly
 @router.get("")
 def prediction_stats():
-    """
-    Returns summary stats + the last 50 predictions for the dashboard chart.
-    """
     db = get_db()
-    
-    # We remove {"_id": 0} here because we need the IDs, we'll convert them to strings below
-    # Sort in Python to avoid issues with mixed created_at field types in DB
+
+    # Sort in Python to handle mixed created_at types safely
     all_preds = list(db["predictions"].find())
     all_preds.sort(key=lambda p: str(p.get("created_at", "")), reverse=True)
 
@@ -61,9 +52,10 @@ def prediction_stats():
     wins       = [p for p in resolved if p.get("won") is True]
     losses     = [p for p in resolved if p.get("won") is False]
 
+    # ── Win rate ──────────────────────────────────────────────────────────────
     win_rate = round(len(wins) / len(resolved) * 100, 1) if resolved else None
 
-    # ROI calculation — fully guarded against None/zero prices
+    # ── ROI — guarded against None/zero ──────────────────────────────────────
     total_roi = 0.0
     for p in resolved:
         yp      = p.get("yes_price") or p.get("entry_price") or 0.5
@@ -79,7 +71,24 @@ def prediction_stats():
 
     roi_pct = round(total_roi / len(resolved) * 100, 1) if resolved else None
 
-    # Cumulative win-rate series for chart
+    # ── Avg edge on BUY calls ────────────────────────────────────────────────
+    edges = [p.get("edge_pct") for p in all_preds if p.get("edge_pct") is not None]
+    avg_edge = round(sum(edges) / len(edges), 1) if edges else None
+
+    # ── Confidence breakdown ──────────────────────────────────────────────────
+    conf_counts = {"high": 0, "medium": 0, "low": 0}
+    for p in all_preds:
+        c = (p.get("confidence") or "low").lower()
+        if c in conf_counts:
+            conf_counts[c] += 1
+
+    # ── Win rate by verdict type ──────────────────────────────────────────────
+    yes_calls  = [p for p in resolved if (p.get("verdict") or p.get("ai_verdict")) == "BUY_YES"]
+    no_calls   = [p for p in resolved if (p.get("verdict") or p.get("ai_verdict")) == "BUY_NO"]
+    yes_wr = round(sum(1 for p in yes_calls if p.get("won")) / len(yes_calls) * 100, 1) if yes_calls else None
+    no_wr  = round(sum(1 for p in no_calls  if p.get("won")) / len(no_calls)  * 100, 1) if no_calls  else None
+
+    # ── Cumulative win-rate series for sparkline chart ────────────────────────
     chart_data = []
     running_wins = 0
     for i, p in enumerate(reversed(resolved[-50:]), 1):
@@ -94,14 +103,16 @@ def prediction_stats():
             "edge_pct": p.get("edge_pct"),
         })
 
-    # Normalise field names and convert _id to string for JSON serialisation
+    # ── Normalise fields for frontend ─────────────────────────────────────────
     for p in all_preds:
-        p["_id"]        = str(p["_id"])
-        p["ai_verdict"] = p.get("verdict") or p.get("ai_verdict")
-        p["entry_price"]= p.get("yes_price") or p.get("entry_price")
+        p["_id"]         = str(p["_id"])
+        p["ai_verdict"]  = p.get("verdict") or p.get("ai_verdict")
+        p["entry_price"] = p.get("yes_price") or p.get("entry_price")
 
     return {
         "predictions": all_preds,
+        "recent":      all_preds[:20],
+        # Summary stats
         "total":       len(all_preds),
         "resolved":    len(resolved),
         "unresolved":  len(unresolved),
@@ -109,6 +120,9 @@ def prediction_stats():
         "losses":      len(losses),
         "win_rate":    win_rate,
         "roi_pct":     roi_pct,
+        "avg_edge":    avg_edge,
+        "conf_counts": conf_counts,
+        "yes_win_rate": yes_wr,
+        "no_win_rate":  no_wr,
         "chart_data":  chart_data,
-        "recent":      all_preds[:20],
     }

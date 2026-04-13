@@ -1,33 +1,29 @@
 """
 prediction_worker.py
 ---------------------
-Background worker that runs once per day, checks Polymarket for closed/resolved
-markets, and updates the `predictions` collection with win/loss outcomes.
+Background worker that runs every 12 hours, checks Polymarket for CLOSED
+markets, and updates the predictions collection with win/loss outcomes.
+
+Resolution rules (BOTH must be true):
+  1. Market must be closed: closed=True AND active=False from the Gamma API.
+  2. Price must have settled: YES >= 0.97 or YES <= 0.03.
+
+A live market trading at 95c is NOT resolved — only closed + settled markets are.
 
 Run standalone:  python prediction_worker.py
-Or via cron:     0 6 * * * /path/to/venv/bin/python /path/to/prediction_worker.py
-
-Resolution logic:
-  - Fetch the market from Polymarket Gamma API using the market_slug.
-  - If the market is closed and a winner is clear (price ≥ 0.97 or ≤ 0.03),
-    mark resolved = True and set won = True/False based on the verdict.
 """
 
+import json
 import time
 import requests
 from datetime import datetime, timezone
 from api.db import get_db
-from config import POLYMARKET_GAMMA
 
 GAMMA_SINGLE = "https://gamma-api.polymarket.com/markets?slug={slug}"
-CHECK_DELAY  = 0.3   # seconds between API calls to avoid rate limits
+CHECK_DELAY  = 0.3
 
 
 def resolve_prediction(pred: dict, db) -> bool:
-    """
-    Checks Polymarket for the current price of the predicted market.
-    Returns True if the prediction was successfully resolved.
-    """
     slug = pred.get("market_slug")
     if not slug:
         return False
@@ -36,39 +32,50 @@ def resolve_prediction(pred: dict, db) -> bool:
         resp = requests.get(GAMMA_SINGLE.format(slug=slug), timeout=8)
         if not resp.ok:
             return False
+
         markets = resp.json()
         if not markets:
             return False
 
         market = markets[0] if isinstance(markets, list) else markets
 
-        # Parse outcome prices
-        import json
+        # ── GATE 1: market must actually be closed ────────────────────────────
+        # Polymarket sets closed=True and active=False when trading has ended.
+        # A market at 95c YES that is still ACTIVE is not resolved — skip it.
+        is_closed = market.get("closed", False)
+        is_active = market.get("active", True)
+
+        if not is_closed and is_active:
+            return False  # still live, do nothing
+
+        # ── GATE 2: price must have settled conclusively ──────────────────────
         outcomes = market.get("outcomes", [])
         prices   = market.get("outcomePrices", [])
 
         if isinstance(outcomes, str):
-            try: outcomes = json.loads(outcomes)
+            try:    outcomes = json.loads(outcomes)
             except: return False
         if isinstance(prices, str):
-            try: prices = json.loads(prices)
+            try:    prices = json.loads(prices)
             except: return False
 
         if "Yes" not in outcomes or len(prices) != 2:
             return False
 
-        yi = outcomes.index("Yes")
+        yi        = outcomes.index("Yes")
         yes_price = float(prices[yi])
 
-        # Only resolve if the price has settled conclusively
         if yes_price >= 0.97:
             yes_won = True
         elif yes_price <= 0.03:
             yes_won = False
         else:
-            return False  # Market still open / unresolved
+            # Closed but mid-resolution (price not yet at 0/1) — wait for next pass
+            print("  SKIP (closed but unsettled at {:.2f}): {}".format(yes_price, slug))
+            return False
 
-        verdict = pred.get("verdict", "")
+        # ── Determine win/loss ────────────────────────────────────────────────
+        verdict = pred.get("verdict") or pred.get("ai_verdict", "")
         if verdict == "BUY_YES":
             won = yes_won
         elif verdict == "BUY_NO":
@@ -85,21 +92,20 @@ def resolve_prediction(pred: dict, db) -> bool:
                 "resolved_at":   datetime.now(timezone.utc).isoformat(),
             }}
         )
-        result_str = "✅ WON" if won else "❌ LOST"
-        print(f"  {result_str}  {pred.get('question', slug)[:60]}")
+        print("  {}  {}".format("WON" if won else "LOST", pred.get("question", slug)[:60]))
         return True
 
     except Exception as e:
-        print(f"  ⚠️  Error resolving {slug}: {e}")
+        print("  Error resolving {}: {}".format(slug, e))
         return False
 
 
 def run_once():
-    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting prediction resolution pass...")
+    print("\n[{}] Starting resolution pass...".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     db = get_db()
 
     unresolved = list(db["predictions"].find({"resolved": False}))
-    print(f"  Found {len(unresolved)} unresolved predictions.")
+    print("  Found {} unresolved predictions.".format(len(unresolved)))
 
     resolved_count = 0
     for pred in unresolved:
@@ -107,11 +113,11 @@ def run_once():
             resolved_count += 1
         time.sleep(CHECK_DELAY)
 
-    print(f"  Resolved {resolved_count} predictions this pass.\n")
+    print("  Resolved {} this pass.\n".format(resolved_count))
 
 
 if __name__ == "__main__":
-    print("Starting EasyBets prediction resolution worker (runs every 24h)...")
+    print("Starting EasyBets prediction resolution worker (runs every 12h)...")
     while True:
         run_once()
-        time.sleep(43200)  # 12 hours
+        time.sleep(43200)

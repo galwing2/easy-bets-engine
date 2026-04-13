@@ -493,83 +493,187 @@ async function openTrackRecord() {
 
   try {
       const res = await fetch('/api/predictions');
-      if (!res.ok) throw new Error('Failed to fetch data');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      
-      const preds = data.predictions || data;
+      const preds = data.predictions || [];
 
-      // If database is completely empty
-      if (!preds || !preds.length) {
-          list.innerHTML = "<p style='color:var(--muted);text-align:center;padding:2rem;'>Waiting to acquire data from closed markets...</p>";
+      if (!preds.length) {
+          list.innerHTML = "<p style='color:var(--muted);text-align:center;padding:2rem;'>No predictions yet. Analyze a market to start building your track record.</p>";
           return;
       }
 
-      // Split predictions into Pending and Closed arrays
       const pending = preds.filter(p => !p.resolved);
       const closed  = preds.filter(p => p.resolved);
+      const wins    = closed.filter(p => p.won);
+      const losses  = closed.filter(p => !p.won);
 
-      let html = '';
+      // ── Stats header ──────────────────────────────────────────────────────
+      const winRate  = data.win_rate  != null ? data.win_rate + '%'  : '--';
+      const roi      = data.roi_pct   != null ? (data.roi_pct > 0 ? '+' : '') + data.roi_pct + '%' : '--';
+      const avgEdge  = data.avg_edge  != null ? (data.avg_edge > 0 ? '+' : '') + data.avg_edge + 'c' : '--';
+      const yesWR    = data.yes_win_rate != null ? data.yes_win_rate + '%' : '--';
+      const noWR     = data.no_win_rate  != null ? data.no_win_rate  + '%' : '--';
+      const roiColor = data.roi_pct > 0 ? '#00e676' : data.roi_pct < 0 ? 'var(--danger)' : 'var(--muted)';
+      const wrColor  = data.win_rate >= 55 ? '#00e676' : data.win_rate >= 45 ? 'var(--warn)' : 'var(--danger)';
 
-      // --- SECTION 1: CLOSED MARKETS (The actual track record) ---
-      html += `<div style="margin-bottom:2rem;">
-                 <h4 style="margin:0 0 0.8rem 0;color:var(--text);border-bottom:1px solid var(--border);padding-bottom:0.4rem;">
-                   Closed Markets (${closed.length})
-                 </h4>`;
-      
-      if (closed.length === 0) {
-          html += `<p style="color:var(--muted);font-size:0.85rem;padding:0.5rem 0;">Waiting for analyzed markets to close to build your track record...</p>`;
-      } else {
-          html += `<div style="display:flex;flex-direction:column;gap:0.8rem;">` + 
-                  closed.map(p => createTrackRecordCard(p)).join('') + 
-                  `</div>`;
+      let html = `
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.7rem;margin-bottom:1.5rem;">
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1rem;">
+          <div style="font-family:var(--mono);font-size:1.6rem;font-weight:500;color:${wrColor};">${winRate}</div>
+          <div style="font-family:var(--mono);font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px;">Win Rate</div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-top:4px;">${wins.length}W / ${losses.length}L from ${closed.length} resolved</div>
+        </div>
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1rem;">
+          <div style="font-family:var(--mono);font-size:1.6rem;font-weight:500;color:${roiColor};">${roi}</div>
+          <div style="font-family:var(--mono);font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px;">Avg ROI / Bet</div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-top:4px;">Avg edge at entry: ${avgEdge}</div>
+        </div>
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1rem;">
+          <div style="font-family:var(--mono);font-size:1.6rem;font-weight:500;color:var(--accent2);">${data.total}</div>
+          <div style="font-family:var(--mono);font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px;">Total AI Calls</div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-top:4px;">${pending.length} pending resolution</div>
+        </div>
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1rem;">
+          <div style="font-family:var(--mono);font-size:1rem;font-weight:500;color:var(--text);line-height:1.4;">
+            <span style="color:#00e676;">BUY YES ${yesWR}</span><br>
+            <span style="color:var(--danger);">BUY NO &nbsp;${noWR}</span>
+          </div>
+          <div style="font-family:var(--mono);font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:4px;">Win Rate by Side</div>
+        </div>
+      </div>`;
+
+      // ── Sparkline chart ───────────────────────────────────────────────────
+      if (data.chart_data && data.chart_data.length > 1) {
+          html += `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1rem;margin-bottom:1.5rem;">
+            <div style="font-family:var(--mono);font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:0.6rem;">Cumulative Win Rate (last ${data.chart_data.length} resolved)</div>
+            <canvas id="tr-chart" height="80" style="width:100%;display:block;"></canvas>
+          </div>`;
       }
+
+      // ── Resolved section ──────────────────────────────────────────────────
+      html += `<div style="margin-bottom:1.5rem;">
+        <h4 style="margin:0 0 0.8rem 0;color:var(--text);border-bottom:1px solid var(--border);padding-bottom:0.4rem;">
+          Resolved (${closed.length})
+        </h4>`;
+      html += closed.length
+          ? `<div style="display:flex;flex-direction:column;gap:0.6rem;">${closed.map(p => createTrackRecordCard(p)).join('')}</div>`
+          : `<p style="color:var(--muted);font-size:0.85rem;">Waiting for markets to close...</p>`;
       html += `</div>`;
 
-      // --- SECTION 2: PENDING PREDICTIONS ---
+      // ── Pending section ───────────────────────────────────────────────────
       html += `<div>
-                 <h4 style="margin:0 0 0.8rem 0;color:var(--text);border-bottom:1px solid var(--border);padding-bottom:0.4rem;">
-                   Pending Predictions (${pending.length})
-                 </h4>`;
-      
-      if (pending.length === 0) {
-          html += `<p style="color:var(--muted);font-size:0.85rem;padding:0.5rem 0;">No pending markets.</p>`;
-      } else {
-          html += `<div style="display:flex;flex-direction:column;gap:0.8rem;">` + 
-                  pending.map(p => createTrackRecordCard(p)).join('') + 
-                  `</div>`;
-      }
+        <h4 style="margin:0 0 0.8rem 0;color:var(--text);border-bottom:1px solid var(--border);padding-bottom:0.4rem;">
+          Pending (${pending.length})
+        </h4>`;
+      html += pending.length
+          ? `<div style="display:flex;flex-direction:column;gap:0.6rem;">${pending.map(p => createTrackRecordCard(p)).join('')}</div>`
+          : `<p style="color:var(--muted);font-size:0.85rem;">No pending predictions.</p>`;
       html += `</div>`;
 
       list.innerHTML = html;
-      
+
+      // Draw chart after DOM is updated
+      if (data.chart_data && data.chart_data.length > 1) {
+          drawTrackRecordChart(data.chart_data);
+      }
+
   } catch (e) {
       list.innerHTML = `<p style='color:var(--danger);text-align:center;padding:2rem;'>Error loading track record: ${e.message}</p>`;
-      console.error('Track record fetch error:', e);
+      console.error('Track record error:', e);
   }
 }
 
-// Helper function to build the cards cleanly
-function createTrackRecordCard(p) {
-  const isCorrect = p.resolved && p.won;
-  let statusBadge = '<span style="color:var(--accent);font-weight:bold;">⏳ PENDING</span>';
-  if (p.resolved) {
-      statusBadge = isCorrect 
-          ? '<span style="color:#00e676;font-weight:bold;">✅ WON</span>' 
-          : '<span style="color:var(--danger);font-weight:bold;">❌ LOST</span>';
-  }
+function drawTrackRecordChart(chartData) {
+  const canvas = document.getElementById('tr-chart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W   = canvas.offsetWidth || 500;
+  const H   = 80;
+  canvas.width  = W;
+  canvas.height = H;
 
+  const pad = { top: 6, right: 8, bottom: 18, left: 32 };
+  const iW  = W - pad.left - pad.right;
+  const iH  = H - pad.top - pad.bottom;
+  const n   = chartData.length;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // 50% reference line
+  const y50 = pad.top + iH * 0.5;
+  ctx.strokeStyle = 'rgba(255,179,0,0.35)';
+  ctx.setLineDash([4, 4]);
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad.left, y50); ctx.lineTo(pad.left + iW, y50); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Win rate line
+  ctx.strokeStyle = '#00e676';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  chartData.forEach((pt, i) => {
+      const x = pad.left + (i / (n - 1)) * iW;
+      const y = pad.top + iH - (pt.win_rate / 100) * iH;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Dots coloured by outcome
+  chartData.forEach((pt, i) => {
+      const x = pad.left + (i / (n - 1)) * iW;
+      const y = pad.top + iH - (pt.win_rate / 100) * iH;
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fillStyle = pt.won ? '#00e676' : '#ff4444';
+      ctx.fill();
+  });
+
+  // Y-axis labels
+  ctx.fillStyle = '#5a6180';
+  ctx.font = '10px DM Mono, monospace';
+  ctx.textAlign = 'right';
+  [0, 50, 100].forEach(pct => {
+      const y = pad.top + iH - (pct / 100) * iH;
+      ctx.fillText(pct + '%', pad.left - 4, y + 3);
+  });
+}
+
+function createTrackRecordCard(p) {
   const verdict      = p.ai_verdict || p.verdict || 'UNKNOWN';
   const verdictColor = verdict === 'BUY_YES' ? '#00e676' : 'var(--danger)';
   const verdictText  = verdict.replace('_', ' ');
+  const entryPrice   = p.entry_price != null ? (p.entry_price * 100).toFixed(0) + 'c' : '--';
+  const fairValue    = p.fair_value  != null ? (p.fair_value  * 100).toFixed(0) + 'c' : '--';
+  const edgeStr      = p.edge_pct    != null ? (p.edge_pct > 0 ? '+' : '') + p.edge_pct.toFixed(1) + 'c' : '';
+  const confColor    = p.confidence === 'high' ? '#00e676' : p.confidence === 'medium' ? 'var(--accent2)' : 'var(--muted)';
+
+  let statusBadge, borderColor;
+  if (!p.resolved) {
+      statusBadge  = '<span style="color:var(--warn);font-size:0.75rem;font-weight:600;">PENDING</span>';
+      borderColor  = 'var(--border)';
+  } else if (p.won) {
+      statusBadge  = '<span style="color:#00e676;font-size:0.75rem;font-weight:600;">WON</span>';
+      borderColor  = 'rgba(0,230,118,0.25)';
+  } else {
+      statusBadge  = '<span style="color:var(--danger);font-size:0.75rem;font-weight:600;">LOST</span>';
+      borderColor  = 'rgba(255,68,68,0.25)';
+  }
+
+  const resolveInfo = p.resolved && p.resolve_price != null
+      ? `<span style="color:var(--muted);font-size:0.72rem;"> · settled ${(p.resolve_price * 100).toFixed(0)}c</span>`
+      : '';
 
   return `
-  <div style="background:var(--surface2);padding:1rem;border-radius:8px;border:1px solid var(--border);">
-    <div style="font-size:0.9rem;margin-bottom:0.5rem;font-weight:600;color:var(--text);">${p.question}</div>
-    <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;color:var(--muted);">
-      <div>
-        <strong style="color:${verdictColor};">${verdictText}</strong>${p.entry_price != null ? ' at ' + (p.entry_price * 100).toFixed(0) + '¢' : ''}
-        <span style="margin:0 5px;">|</span>
-        ${p.fair_value != null ? 'Fair Value: ' + (p.fair_value * 100).toFixed(0) + '¢' : ''}
+  <div style="background:var(--surface2);padding:0.85rem 1rem;border-radius:8px;border:1px solid ${borderColor};">
+    <div style="font-size:0.85rem;font-weight:600;color:var(--text);margin-bottom:0.45rem;line-height:1.4;">${p.question || 'Unknown market'}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.4rem;">
+      <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;font-size:0.75rem;">
+        <span style="background:rgba(0,0,0,0.2);padding:0.15rem 0.45rem;border-radius:4px;color:${verdictColor};font-family:var(--mono);font-weight:600;">${verdictText}</span>
+        <span style="color:var(--muted);">entry ${entryPrice}</span>
+        <span style="color:var(--muted);">fair ${fairValue}</span>
+        ${edgeStr ? `<span style="color:var(--accent2);font-family:var(--mono);">${edgeStr} edge</span>` : ''}
+        <span style="color:${confColor};font-family:var(--mono);font-size:0.7rem;">${(p.confidence || 'low').toUpperCase()}</span>
+        ${resolveInfo}
       </div>
       <div>${statusBadge}</div>
     </div>
