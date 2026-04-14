@@ -49,6 +49,7 @@ async def analyze_market(body: AnalyzeRequest):
                         "yes_price":   body.yes_price,
                         "entry_price": body.yes_price,
                         "end_date":    body.end_date,
+                        "market_slug": body.market_slug,  # <-- ADD THIS LINE
                         "analyzed_at": now,
                     }}
                 )
