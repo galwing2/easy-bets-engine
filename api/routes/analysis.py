@@ -21,29 +21,54 @@ async def analyze_market(body: AnalyzeRequest):
     """
     result, from_cache = await analyze(body.cache_key, body.question, body.yes_price)
 
-    # Auto-save qualifying predictions for the track record
+    # Auto-save/refresh qualifying predictions for the track record.
+    # Uses upsert so re-analyzing the same market refreshes the pending card
+    # with the latest verdict, confidence, and analyzed_at timestamp.
     if not from_cache and "error" not in result:
         verdict    = result.get("verdict", "")
         confidence = result.get("confidence", "low")
         if verdict in ("BUY_YES", "BUY_NO") and confidence in ("high", "medium"):
-            db = get_db()
-            if not db["predictions"].find_one({"cache_key": body.cache_key}):
+            db  = get_db()
+            now = datetime.now(timezone.utc).isoformat()
+            existing = db["predictions"].find_one({"cache_key": body.cache_key})
+            if existing and existing.get("resolved"):
+                # Already resolved — don't overwrite the outcome
+                pass
+            elif existing:
+                # Pending — refresh with latest AI result
+                db["predictions"].update_one(
+                    {"cache_key": body.cache_key},
+                    {"$set": {
+                        "verdict":     verdict,
+                        "ai_verdict":  verdict,
+                        "fair_value":  result.get("fair_value"),
+                        "edge_pct":    result.get("edge_pct"),
+                        "confidence":  confidence,
+                        "yes_price":   body.yes_price,
+                        "entry_price": body.yes_price,
+                        "analyzed_at": now,
+                    }}
+                )
+            else:
+                # New prediction
                 db["predictions"].insert_one({
-                    "cache_key":   body.cache_key,
-                    "question":    body.question,
-                    "market_slug": body.market_slug,
-                    "yes_price":   body.yes_price,
-                    "entry_price": body.yes_price,
-                    "verdict":     verdict,
-                    "ai_verdict":  verdict,
-                    "fair_value":  result.get("fair_value"),
-                    "edge_pct":    result.get("edge_pct"),
-                    "confidence":  confidence,
-                    "resolved":    False,
-                    "won":         None,
+                    "cache_key":     body.cache_key,
+                    "question":      body.question,
+                    "market_slug":   body.market_slug,
+                    "yes_price":     body.yes_price,
+                    "entry_price":   body.yes_price,
+                    "verdict":       verdict,
+                    "ai_verdict":    verdict,
+                    "fair_value":    result.get("fair_value"),
+                    "edge_pct":      result.get("edge_pct"),
+                    "confidence":    confidence,
+                    "end_date":      getattr(body, "end_date", ""),
+                    "resolved":      False,
+                    "won":           None,
                     "resolve_price": None,
-                    "created_at":  datetime.now(timezone.utc).isoformat(),
-                    "resolved_at": None,
+                    "created_at":    now,
+                    "analyzed_at":   now,
+                    "resolved_at":   None,
                 })
 
     return {"result": result, "from_cache": from_cache}

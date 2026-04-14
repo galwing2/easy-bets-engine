@@ -12,6 +12,7 @@ class AnalyzeRequest(BaseModel):
     question: str
     yes_price: float
     market_slug: str = ""  # needed to resolve predictions later
+    end_date: str = ""       # market closing date for track record display
 
 class MagicLinkRequest(BaseModel):
     email: str

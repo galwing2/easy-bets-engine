@@ -397,12 +397,14 @@ function scrollToMarket(slug) {
 /* ── AI Analysis ─────────────────────────────────────────── */
 
 async function triggerAnalysis(card) {
-    const btn      = card.querySelector('.ai-btn');
-    const panel    = card.querySelector('.ai-panel');
-    const cacheKey = card.dataset.cacheKey;
-    const question = card.dataset.question;
-    const yesPrice = parseFloat(card.dataset.yesPrice);
-    const polyUrl  = card.dataset.polyUrl;
+    const btn        = card.querySelector('.ai-btn');
+    const panel      = card.querySelector('.ai-panel');
+    const cacheKey   = card.dataset.cacheKey;
+    const question   = card.dataset.question;
+    const yesPrice   = parseFloat(card.dataset.yesPrice);
+    const polyUrl    = card.dataset.polyUrl;
+    const marketSlug = card.dataset.marketSlug || '';
+    const endDate    = card.dataset.endDate    || '';
 
     btn.textContent  = '⏳ Researching...';
     btn.disabled     = true;
@@ -416,7 +418,7 @@ async function triggerAnalysis(card) {
         const r = await fetch('/api/analyze-market', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cache_key: cacheKey, question, yes_price: yesPrice })
+            body: JSON.stringify({ cache_key: cacheKey, question, yes_price: yesPrice, market_slug: marketSlug, end_date: endDate })
         });
         let data;
         try { data = await r.json(); } catch (_) {
@@ -508,37 +510,24 @@ async function openTrackRecord() {
       const losses  = closed.filter(p => !p.won);
 
       // ── Stats header ──────────────────────────────────────────────────────
-      const winRate  = data.win_rate  != null ? data.win_rate + '%'  : '--';
-      const roi      = data.roi_pct   != null ? (data.roi_pct > 0 ? '+' : '') + data.roi_pct + '%' : '--';
-      const avgEdge  = data.avg_edge  != null ? (data.avg_edge > 0 ? '+' : '') + data.avg_edge + 'c' : '--';
-      const yesWR    = data.yes_win_rate != null ? data.yes_win_rate + '%' : '--';
-      const noWR     = data.no_win_rate  != null ? data.no_win_rate  + '%' : '--';
-      const roiColor = data.roi_pct > 0 ? '#00e676' : data.roi_pct < 0 ? 'var(--danger)' : 'var(--muted)';
-      const wrColor  = data.win_rate >= 55 ? '#00e676' : data.win_rate >= 45 ? 'var(--warn)' : 'var(--danger)';
+      const winRate = data.win_rate != null ? data.win_rate + '%' : '--';
+      const yesWR   = data.yes_win_rate != null ? data.yes_win_rate + '%' : '--';
+      const noWR    = data.no_win_rate  != null ? data.no_win_rate  + '%' : '--';
+      const wrColor = data.win_rate >= 55 ? '#00e676' : data.win_rate >= 45 ? 'var(--warn)' : data.win_rate != null ? 'var(--danger)' : 'var(--muted)';
 
       let html = `
-      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.7rem;margin-bottom:1.5rem;">
-        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1rem;">
-          <div style="font-family:var(--mono);font-size:1.6rem;font-weight:500;color:${wrColor};">${winRate}</div>
-          <div style="font-family:var(--mono);font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px;">Win Rate</div>
-          <div style="font-size:0.75rem;color:var(--muted);margin-top:4px;">${wins.length}W / ${losses.length}L from ${closed.length} resolved</div>
-        </div>
-        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1rem;">
-          <div style="font-family:var(--mono);font-size:1.6rem;font-weight:500;color:${roiColor};">${roi}</div>
-          <div style="font-family:var(--mono);font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px;">Avg ROI / Bet</div>
-          <div style="font-size:0.75rem;color:var(--muted);margin-top:4px;">Avg edge at entry: ${avgEdge}</div>
-        </div>
-        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1rem;">
-          <div style="font-family:var(--mono);font-size:1.6rem;font-weight:500;color:var(--accent2);">${data.total}</div>
-          <div style="font-family:var(--mono);font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px;">Total AI Calls</div>
-          <div style="font-size:0.75rem;color:var(--muted);margin-top:4px;">${pending.length} pending resolution</div>
-        </div>
-        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1rem;">
-          <div style="font-family:var(--mono);font-size:1rem;font-weight:500;color:var(--text);line-height:1.4;">
-            <span style="color:#00e676;">BUY YES ${yesWR}</span><br>
-            <span style="color:var(--danger);">BUY NO &nbsp;${noWR}</span>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1.2rem 1.4rem;margin-bottom:1rem;">
+        <div style="font-family:var(--mono);font-size:2.8rem;font-weight:500;color:${wrColor};line-height:1;">${winRate}</div>
+        <div style="font-family:var(--mono);font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-top:4px;">Win Rate</div>
+        <div style="margin-top:0.8rem;display:flex;gap:1.5rem;flex-wrap:wrap;">
+          <div>
+            <div style="font-size:0.75rem;color:var(--muted);">${wins.length}W / ${losses.length}L &nbsp;·&nbsp; ${closed.length} resolved &nbsp;·&nbsp; ${pending.length} pending</div>
           </div>
-          <div style="font-family:var(--mono);font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:4px;">Win Rate by Side</div>
+        </div>
+        <div style="margin-top:0.6rem;display:flex;gap:1.2rem;flex-wrap:wrap;font-family:var(--mono);font-size:0.78rem;">
+          <span>Total calls: <strong style="color:var(--text);">${data.total}</strong></span>
+          <span style="color:#00e676;">BUY YES: ${yesWR}</span>
+          <span style="color:var(--danger);">BUY NO: ${noWR}</span>
         </div>
       </div>`;
 
@@ -642,38 +631,44 @@ function createTrackRecordCard(p) {
   const verdict      = p.ai_verdict || p.verdict || 'UNKNOWN';
   const verdictColor = verdict === 'BUY_YES' ? '#00e676' : 'var(--danger)';
   const verdictText  = verdict.replace('_', ' ');
-  const entryPrice   = p.entry_price != null ? (p.entry_price * 100).toFixed(0) + 'c' : '--';
-  const fairValue    = p.fair_value  != null ? (p.fair_value  * 100).toFixed(0) + 'c' : '--';
-  const edgeStr      = p.edge_pct    != null ? (p.edge_pct > 0 ? '+' : '') + p.edge_pct.toFixed(1) + 'c' : '';
+  const conf         = (p.confidence || 'low').toUpperCase();
   const confColor    = p.confidence === 'high' ? '#00e676' : p.confidence === 'medium' ? 'var(--accent2)' : 'var(--muted)';
 
   let statusBadge, borderColor;
   if (!p.resolved) {
-      statusBadge  = '<span style="color:var(--warn);font-size:0.75rem;font-weight:600;">PENDING</span>';
-      borderColor  = 'var(--border)';
+      statusBadge = '<span style="color:var(--warn);font-size:0.72rem;font-family:var(--mono);font-weight:600;letter-spacing:.04em;">PENDING</span>';
+      borderColor = 'var(--border)';
   } else if (p.won) {
-      statusBadge  = '<span style="color:#00e676;font-size:0.75rem;font-weight:600;">WON</span>';
-      borderColor  = 'rgba(0,230,118,0.25)';
+      statusBadge = '<span style="color:#00e676;font-size:0.72rem;font-family:var(--mono);font-weight:600;letter-spacing:.04em;">WON</span>';
+      borderColor = 'rgba(0,230,118,0.2)';
   } else {
-      statusBadge  = '<span style="color:var(--danger);font-size:0.75rem;font-weight:600;">LOST</span>';
-      borderColor  = 'rgba(255,68,68,0.25)';
+      statusBadge = '<span style="color:var(--danger);font-size:0.72rem;font-family:var(--mono);font-weight:600;letter-spacing:.04em;">LOST</span>';
+      borderColor = 'rgba(255,68,68,0.2)';
   }
 
-  const resolveInfo = p.resolved && p.resolve_price != null
-      ? `<span style="color:var(--muted);font-size:0.72rem;"> · settled ${(p.resolve_price * 100).toFixed(0)}c</span>`
-      : '';
+  // Format analyzed_at as HH:MM
+  let analyzedStr = '';
+  if (p.analyzed_at || p.created_at) {
+      try {
+          const d = new Date(p.analyzed_at || p.created_at);
+          const hh = String(d.getUTCHours()).padStart(2, '0');
+          const mm = String(d.getUTCMinutes()).padStart(2, '0');
+          const dd = d.toISOString().slice(0, 10);
+          analyzedStr = dd + ' ' + hh + ':' + mm;
+      } catch (_) {}
+  }
+
+  const closingDate = p.end_date ? p.end_date : '';
 
   return `
   <div style="background:var(--surface2);padding:0.85rem 1rem;border-radius:8px;border:1px solid ${borderColor};">
-    <div style="font-size:0.85rem;font-weight:600;color:var(--text);margin-bottom:0.45rem;line-height:1.4;">${p.question || 'Unknown market'}</div>
+    <div style="font-size:0.85rem;font-weight:600;color:var(--text);margin-bottom:0.5rem;line-height:1.4;">${p.question || 'Unknown market'}</div>
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.4rem;">
-      <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;font-size:0.75rem;">
-        <span style="background:rgba(0,0,0,0.2);padding:0.15rem 0.45rem;border-radius:4px;color:${verdictColor};font-family:var(--mono);font-weight:600;">${verdictText}</span>
-        <span style="color:var(--muted);">entry ${entryPrice}</span>
-        <span style="color:var(--muted);">fair ${fairValue}</span>
-        ${edgeStr ? `<span style="color:var(--accent2);font-family:var(--mono);">${edgeStr} edge</span>` : ''}
-        <span style="color:${confColor};font-family:var(--mono);font-size:0.7rem;">${(p.confidence || 'low').toUpperCase()}</span>
-        ${resolveInfo}
+      <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+        <span style="background:rgba(0,0,0,0.25);padding:0.15rem 0.5rem;border-radius:4px;color:${verdictColor};font-family:var(--mono);font-size:0.72rem;font-weight:600;">${verdictText}</span>
+        <span style="color:${confColor};font-family:var(--mono);font-size:0.72rem;font-weight:600;">${conf}</span>
+        ${analyzedStr ? `<span style="color:var(--muted);font-family:var(--mono);font-size:0.7rem;">analyzed ${analyzedStr}</span>` : ''}
+        ${closingDate ? `<span style="color:var(--muted);font-family:var(--mono);font-size:0.7rem;">closes ${closingDate}</span>` : ''}
       </div>
       <div>${statusBadge}</div>
     </div>
