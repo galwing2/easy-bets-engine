@@ -198,6 +198,7 @@ function buildCard(m) {
     card.dataset.yesPrice   = m.yes_price;
     card.dataset.polyUrl    = m.poly_url || 'https://polymarket.com';
     card.dataset.marketSlug = m.market_slug || '';
+    card.dataset.endDate    = m.end_date || ''; // Added so it passes to the backend analysis
 
     card.innerHTML = `
         <div class="card-body">
@@ -376,11 +377,18 @@ async function deleteAlert(id) {
 }
 
 function scrollToMarket(slug) {
-    document.getElementById('manage-alerts-modal').style.display = 'none';
+    // Hide both modals so the view is clear when scrolling
+    const alertsModal = document.getElementById('manage-alerts-modal');
+    if (alertsModal) alertsModal.style.display = 'none';
+    
+    const trackRecordModal = document.getElementById('track-record-modal');
+    if (trackRecordModal) trackRecordModal.style.display = 'none';
+
     const allSportBtn = document.querySelector('#sport-filters .filter-chip');
     if (allSportBtn) setSportFilter('all', allSportBtn);
     const allEdgeBtn = document.querySelector('.subfilter-chip');
     if (allEdgeBtn) setEdgeFilter('all', allEdgeBtn);
+    
     setTimeout(() => {
         const targetCard = document.getElementById(`market-${slug}`);
         if (targetCard) {
@@ -509,13 +517,19 @@ async function openTrackRecord() {
       const wins    = closed.filter(p => p.won);
       const losses  = closed.filter(p => !p.won);
 
+      // ── Explainer Header ──────────────────────────────────────────────────
+      let html = `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem;margin-bottom:1rem;font-size:0.82rem;line-height:1.5;color:var(--muted);">
+        <strong style="color:var(--text);">How EasyBets Works:</strong> The AI scans live sports markets and calculates its own <strong>Fair Value</strong>. If it finds a statistical edge (Fair Value is higher than the Market Price) with High or Medium confidence, it logs a <strong>BUY</strong> prediction here. Pending markets stay here until their real-world end date, waiting to automatically resolve. If a market is later re-analyzed as FAIR, it drops off this list.
+      </div>`;
+
       // ── Stats header ──────────────────────────────────────────────────────
       const winRate = data.win_rate != null ? data.win_rate + '%' : '--';
       const yesWR   = data.yes_win_rate != null ? data.yes_win_rate + '%' : '--';
       const noWR    = data.no_win_rate  != null ? data.no_win_rate  + '%' : '--';
       const wrColor = data.win_rate >= 55 ? '#00e676' : data.win_rate >= 45 ? 'var(--warn)' : data.win_rate != null ? 'var(--danger)' : 'var(--muted)';
 
-      let html = `
+      html += `
       <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1.2rem 1.4rem;margin-bottom:1rem;">
         <div style="font-family:var(--mono);font-size:2.8rem;font-weight:500;color:${wrColor};line-height:1;">${winRate}</div>
         <div style="font-family:var(--mono);font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-top:4px;">Win Rate</div>
@@ -646,23 +660,28 @@ function createTrackRecordCard(p) {
       borderColor = 'rgba(255,68,68,0.2)';
   }
 
-  // Format analyzed_at as HH:MM
+  // FIXED TIMEZONE: Converts the UTC timestamp automatically to your local device time
   let analyzedStr = '';
   if (p.analyzed_at || p.created_at) {
       try {
           const d = new Date(p.analyzed_at || p.created_at);
-          const hh = String(d.getUTCHours()).padStart(2, '0');
-          const mm = String(d.getUTCMinutes()).padStart(2, '0');
-          const dd = d.toISOString().slice(0, 10);
+          const hh = String(d.getHours()).padStart(2, '0');
+          const mm = String(d.getMinutes()).padStart(2, '0');
+          const dd = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
           analyzedStr = dd + ' ' + hh + ':' + mm;
       } catch (_) {}
   }
 
   const closingDate = p.end_date ? p.end_date : '';
 
+  // ADDED LINK: Pending markets are now clickable links to scroll down the page
+  const questionHtml = (!p.resolved && p.market_slug)
+      ? `<a href="javascript:void(0)" onclick="scrollToMarket('${p.market_slug}')" style="color:var(--text);text-decoration:none;border-bottom:1px dashed var(--muted);transition:0.2s;">${p.question || 'Unknown market'} ↗</a>`
+      : `${p.question || 'Unknown market'}`;
+
   return `
   <div style="background:var(--surface2);padding:0.85rem 1rem;border-radius:8px;border:1px solid ${borderColor};">
-    <div style="font-size:0.85rem;font-weight:600;color:var(--text);margin-bottom:0.5rem;line-height:1.4;">${p.question || 'Unknown market'}</div>
+    <div style="font-size:0.85rem;font-weight:600;color:var(--text);margin-bottom:0.5rem;line-height:1.4;">${questionHtml}</div>
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.4rem;">
       <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
         <span style="background:rgba(0,0,0,0.25);padding:0.15rem 0.5rem;border-radius:4px;color:${verdictColor};font-family:var(--mono);font-size:0.72rem;font-weight:600;">${verdictText}</span>

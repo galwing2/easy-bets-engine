@@ -3,8 +3,8 @@ api/routes/analysis.py — AI misprice analysis + debug endpoints.
 """
 import requests
 from fastapi import APIRouter
-
 from datetime import datetime, timezone
+
 from config import GEMINI_API_KEY, GEMINI_URL, TAVILY_API_KEY
 from api.ai import analyze, call_gemini
 from api.models import AnalyzeRequest
@@ -18,24 +18,26 @@ async def analyze_market(body: AnalyzeRequest):
     """
     Lazy-loaded per card. Returns cached MongoDB result (<6 hrs) or calls Gemini.
     Auto-saves high/medium-confidence BUY verdicts to the predictions collection.
+    Removes pending predictions if re-analyzed as FAIR.
     """
     result, from_cache = await analyze(body.cache_key, body.question, body.yes_price)
 
-    # Auto-save/refresh qualifying predictions for the track record.
-    # Uses upsert so re-analyzing the same market refreshes the pending card
-    # with the latest verdict, confidence, and analyzed_at timestamp.
+    # Auto-save, refresh, or remove predictions for the track record.
     if not from_cache and "error" not in result:
         verdict    = result.get("verdict", "")
         confidence = result.get("confidence", "low")
+        
+        db  = get_db()
+        now = datetime.now(timezone.utc).isoformat()
+        existing = db["predictions"].find_one({"cache_key": body.cache_key})
+
+        # Check if it's a valid bet
         if verdict in ("BUY_YES", "BUY_NO") and confidence in ("high", "medium"):
-            db  = get_db()
-            now = datetime.now(timezone.utc).isoformat()
-            existing = db["predictions"].find_one({"cache_key": body.cache_key})
             if existing and existing.get("resolved"):
-                # Already resolved — don't overwrite the outcome
+                # Already resolved — don't overwrite the final outcome
                 pass
             elif existing:
-                # Pending — refresh with latest AI result
+                # Pending — refresh with latest AI result and End Date
                 db["predictions"].update_one(
                     {"cache_key": body.cache_key},
                     {"$set": {
@@ -46,6 +48,7 @@ async def analyze_market(body: AnalyzeRequest):
                         "confidence":  confidence,
                         "yes_price":   body.yes_price,
                         "entry_price": body.yes_price,
+                        "end_date":    body.end_date,
                         "analyzed_at": now,
                     }}
                 )
@@ -62,7 +65,7 @@ async def analyze_market(body: AnalyzeRequest):
                     "fair_value":    result.get("fair_value"),
                     "edge_pct":      result.get("edge_pct"),
                     "confidence":    confidence,
-                    "end_date":      getattr(body, "end_date", ""),
+                    "end_date":      body.end_date,
                     "resolved":      False,
                     "won":           None,
                     "resolve_price": None,
@@ -70,6 +73,11 @@ async def analyze_market(body: AnalyzeRequest):
                     "analyzed_at":   now,
                     "resolved_at":   None,
                 })
+        else:
+            # Result is FAIR, SKIP, or low confidence. 
+            # If this market was previously saved as a pending bet, delete it.
+            if existing and not existing.get("resolved"):
+                db["predictions"].delete_one({"cache_key": body.cache_key})
 
     return {"result": result, "from_cache": from_cache}
 
