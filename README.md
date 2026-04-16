@@ -1,5 +1,6 @@
 # AI Easy Bets Engine
 **🌐 Live Site:** [easybets.com](http://13.60.66.250:8000/) 
+** Note: website is live but the project is still in progress and is constantly changing and improving**
 
 EasyBets Engine 🎯
 An autonomous, AI-driven quantitative analytics platform that tracks over 300+ live sports prediction markets daily. EasyBets utilizes a multi-agent LLM pipeline to calculate objective "Fair Value," identify statistical mispricings, and automatically track historical ROI.
