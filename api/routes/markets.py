@@ -37,16 +37,41 @@ def _parse(v) -> list:
 
 @router.post("/markets")
 def markets(body: MarketRequest):
-    try:
-        events = requests.get(POLYMARKET_GAMMA, timeout=8).json()
-    except Exception as e:
-        raise HTTPException(502, str(e))
+    events = []
+    limit = 100  # Number of events to fetch per API page
+    offset = 0
+    
+    # ── PAGINATION LOOP: Fetch ALL active events ────────────────────────
+    while True:
+        # Safely append parameters whether your config URL has a '?' or not
+        sep = "&" if "?" in POLYMARKET_GAMMA else "?"
+        url = f"{POLYMARKET_GAMMA}{sep}active=true&closed=false&limit={limit}&offset={offset}"
+        
+        try:
+            resp = requests.get(url, timeout=10)
+            if not resp.ok:
+                break
+            
+            batch = resp.json()
+            if not batch:  # Empty list means we reached the end
+                break
+                
+            events.extend(batch)
+            offset += limit
+        except Exception as e:
+            print(f"Pagination error at offset {offset}: {e}")
+            break
+
+    if not events:
+        raise HTTPException(502, "Failed to fetch markets from Polymarket.")
+    # ────────────────────────────────────────────────────────────────────
 
     out = []
     for event in events:
         title = event.get("title", "")
         tags  = event.get("tags") or []
 
+        # Your custom sports filter acts as the bouncer!
         if not is_sports_market(title, tags):
             continue
 
@@ -108,13 +133,30 @@ def markets(body: MarketRequest):
 
 @router.get("/stats")
 def stats():
-    try:
-        events = requests.get(POLYMARKET_GAMMA, timeout=5).json()
-        count  = sum(
-            len(e.get("markets", []))
-            for e in events
-            if is_sports_market(e.get("title", ""), e.get("tags") or [])
-        )
-        return {"open_markets": count}
-    except Exception:
+    events = []
+    limit = 100
+    offset = 0
+    
+    # ── PAGINATION LOOP FOR STATS ───────────────────────────────────────
+    while True:
+        sep = "&" if "?" in POLYMARKET_GAMMA else "?"
+        url = f"{POLYMARKET_GAMMA}{sep}active=true&closed=false&limit={limit}&offset={offset}"
+        try:
+            resp = requests.get(url, timeout=5)
+            if not resp.ok: break
+            batch = resp.json()
+            if not batch: break
+            events.extend(batch)
+            offset += limit
+        except Exception:
+            break
+            
+    if not events:
         return {"open_markets": "500+"}
+
+    count = sum(
+        len(e.get("markets", []))
+        for e in events
+        if is_sports_market(e.get("title", ""), e.get("tags") or [])
+    )
+    return {"open_markets": count}
