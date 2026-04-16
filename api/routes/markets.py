@@ -40,7 +40,7 @@ def markets(body: MarketRequest):
     events = []
     limit = 500  # Pull maximum allowed per request to speed up network trips
     offset = 0
-    max_pages = 10 # SAFETY VALVE: Cap at 5000 events to guarantee fast loading
+    max_pages = 5 # SAFETY VALVE: Cap at 5000 events to guarantee fast loading
     pages_fetched = 0
     
     # ── PAGINATION LOOP: Fetch top active events ────────────────────────
