@@ -38,12 +38,13 @@ def _parse(v) -> list:
 @router.post("/markets")
 def markets(body: MarketRequest):
     events = []
-    limit = 100  # Number of events to fetch per API page
+    limit = 500  # Pull maximum allowed per request to speed up network trips
     offset = 0
+    max_pages = 10 # SAFETY VALVE: Cap at 5000 events to guarantee fast loading
+    pages_fetched = 0
     
-    # ── PAGINATION LOOP: Fetch ALL active events ────────────────────────
-    while True:
-        # Safely append parameters whether your config URL has a '?' or not
+    # ── PAGINATION LOOP: Fetch top active events ────────────────────────
+    while pages_fetched < max_pages:
         sep = "&" if "?" in POLYMARKET_GAMMA else "?"
         url = f"{POLYMARKET_GAMMA}{sep}active=true&closed=false&limit={limit}&offset={offset}"
         
@@ -58,6 +59,7 @@ def markets(body: MarketRequest):
                 
             events.extend(batch)
             offset += limit
+            pages_fetched += 1
         except Exception as e:
             print(f"Pagination error at offset {offset}: {e}")
             break
@@ -134,11 +136,13 @@ def markets(body: MarketRequest):
 @router.get("/stats")
 def stats():
     events = []
-    limit = 100
+    limit = 500
     offset = 0
+    max_pages = 5 # Even faster for the quick stats counter
+    pages_fetched = 0
     
     # ── PAGINATION LOOP FOR STATS ───────────────────────────────────────
-    while True:
+    while pages_fetched < max_pages:
         sep = "&" if "?" in POLYMARKET_GAMMA else "?"
         url = f"{POLYMARKET_GAMMA}{sep}active=true&closed=false&limit={limit}&offset={offset}"
         try:
@@ -148,6 +152,7 @@ def stats():
             if not batch: break
             events.extend(batch)
             offset += limit
+            pages_fetched += 1
         except Exception:
             break
             
