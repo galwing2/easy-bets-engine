@@ -1,4 +1,5 @@
 # AI Easy Bets Engine
+Platform link: http://13.60.66.250:8000/
 
 End-to-end system that analyzes prediction markets and identifies mispriced opportunities using machine learning.
 
