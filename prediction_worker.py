@@ -11,6 +11,7 @@ Resolution logic:
 """
 
 import time
+import json
 import requests
 from datetime import datetime, timezone
 from api.db import get_db
@@ -55,7 +56,6 @@ def resolve_prediction(pred: dict, db) -> bool:
                 pass 
 
         # Parse outcomes
-        import json
         outcomes = market.get("outcomes", [])
         prices   = market.get("outcomePrices", [])
 
@@ -132,4 +132,4 @@ if __name__ == "__main__":
     print("Starting EasyBets prediction resolution worker (runs every 1 hour)...")
     while True:
         run_once()
-        time.sleep(3600)  # Changed from 12 hours to 1 hour
+        time.sleep(3600)
