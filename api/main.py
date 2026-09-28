@@ -9,7 +9,7 @@ Cache layers:
   3. Arb cache        — arb groups, TTL 5 min (same fetch as market cache)
 
 Endpoints:
-  GET  /                  → index.html
+  GET  /                  → frontend/templates/index.html
   GET  /api/stats         → live market counts
   GET  /api/cache-status  → cache health + age
   POST /api/markets       → personalized scored markets for a user profile
@@ -29,15 +29,25 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
 from collections import defaultdict
+from typing import Tuple, List
 
-from fastapi import FastAPI
+
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
-from dotenv import load_dotenv
+from dotenv import load_dotenv 
+from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
+
+# ── Paths (resolved from this file, NOT from the working directory) ────────────
+BASE_DIR        = Path(__file__).resolve().parent.parent      # easy-bets-engine/
+INDEX_FILE      = BASE_DIR / "frontend" / "templates" / "index.html"
+STATIC_DIR      = BASE_DIR / "frontend" / "static"            # only mounted if it exists
+BASE_RATES_PATH = BASE_DIR / "models" / "base_rates.json"
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 GAMMA_BASE      = "https://gamma-api.polymarket.com"
@@ -45,7 +55,9 @@ PAGE_SIZE       = 100
 MARKET_TTL      = 300        # 5 min — how long raw market data is valid
 SCORED_TTL      = 300        # 5 min — how long scored/categorised results are valid
 FETCH_PAGES     = 5          # pages of open markets to fetch (100 markets each)
-BASE_RATES_PATH = Path("models/base_rates.json")
+
+# Optional: set ADMIN_TOKEN in your .env to protect /api/cache/invalidate
+ADMIN_TOKEN     = os.getenv("ADMIN_TOKEN")
 
 
 # ── Cache store ────────────────────────────────────────────────────────────────
@@ -105,6 +117,7 @@ def load_base_rates() -> dict:
     if BASE_RATES_PATH.exists():
         with open(BASE_RATES_PATH) as f:
             return json.load(f)
+    print(f"[warn] {BASE_RATES_PATH} not found — using built-in default base rates.")
     return {
         "crypto_price":       {"yes_rate": 0.05, "n_markets": 11},
         "economic_threshold": {"yes_rate": 0.03, "n_markets": 22},
@@ -408,6 +421,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="EasyBets API", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -416,14 +431,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Serve JS/CSS/images for the frontend (only if the folder exists)
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def serve_frontend():
-    html_path = Path("index.html")
-    if html_path.exists():
-        return HTMLResponse(content=html_path.read_text())
-    return HTMLResponse(content="<h1>EasyBets — index.html not found</h1>", status_code=404)
+    if INDEX_FILE.exists():
+        return HTMLResponse(content=INDEX_FILE.read_text(encoding="utf-8"))
+    return HTMLResponse(
+        content=f"<h1>EasyBets — index.html not found at {INDEX_FILE}</h1>",
+        status_code=404,
+    )
 
 
 @app.get("/api/stats")
@@ -493,8 +514,15 @@ async def get_markets(req: MarketsRequest):
 
 
 @app.post("/api/cache/invalidate")
-async def invalidate_cache():
-    """Force a full cache flush — useful after retraining the model."""
+async def invalidate_cache(x_admin_token: Optional[str] = Header(default=None)):
+    """
+    Force a full cache flush — useful after retraining the model.
+    If ADMIN_TOKEN is set in the environment, callers must send it in the
+    'X-Admin-Token' header.
+    """
+    if ADMIN_TOKEN and x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     CACHE.invalidate()
     # Re-warm immediately
     markets = await asyncio.to_thread(_fetch_open_markets_from_api)
