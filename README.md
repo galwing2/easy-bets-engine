@@ -8,8 +8,17 @@ An autonomous, AI-driven quantitative analytics platform that tracks over 300+ l
 🚀 Overview
 Prediction markets move fast, and finding true statistical edges requires synthesizing real-time news, historical data, and live order books. EasyBets automates this process. By integrating the Polymarket Gamma API with Google's Gemini and Tavily's live web search, the engine evaluates real-time odds, generates bull/bear cases, and logs verifiable "BUY" predictions when a high-confidence edge is found.
 
+
 ✨ Key Features
 Real-Time Market Scanning: Ingests and filters 300+ live sports markets daily from Polymarket.
+
+Data Ingestion: It pulls the live current price from the Polymarket Gamma API.
+
+Market Comparison: It cross-references that price against traditional online sportsbook odds to find immediate discrepancies.
+
+Qualitative Context: It triggers Tavily’s live web search to scrape the internet for real-time context—like last-minute injury reports, roster changes, or weather conditions.
+
+Synthesis: All of this quantitative and qualitative data is fed into Google's Gemini API, which synthesizes the chaos into clear Bull/Bear cases, calculates an objective "Fair Value" percentage, and logs actionable "BUY" predictions.
 
 AI Edge Calculation: Uses Gemini to synthesize live web data (via Tavily) to calculate true probability ("Fair Value") and compare it against the current market YES/NO price.
 
@@ -18,6 +27,8 @@ Automated Resolution Tracking: Background workers autonomously track pending bet
 Track Record Dashboard: A responsive SPA frontend that visualizes cumulative win rates, overall ROI, and pending vs. resolved calls.
 
 Custom User Alerts: Users can set specific price targets (e.g., "Alert me if YES drops below 40¢"), monitored by a dedicated background worker.
+
+
 
 🛠 Tech Stack
 Backend: Python, FastAPI
